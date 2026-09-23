@@ -1,36 +1,89 @@
 /**
- * What the model — and through it the user — is told about a provisioning
- * failure, and what is deliberately withheld.
+ * What the model — and through it the user — is told about a recognized
+ * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test. Two properties matter more than the wording:
+ * by a test, one family at a time. The two families are shaped by the same two
+ * questions, and they answer them differently:
  *
- * - **It names the right the caller is missing.** The reported failures are
- *   `ERROR_ACCESS_DENIED` from a *merged* DACL + SACL write. The missing right
- *   is `WRITE_OWNER` on the directory — an object right the caller can grant
- *   itself with `icacls`, unelevated. It is **not** `SeSecurityPrivilege`, the
- *   token privilege the reports naturally reach for; `whoami /priv` cannot show
- *   the difference, and elevation is the wrong lever.
- * - **It gives a discriminator, not just a remedy.** Applying a fix without
- *   confirming the cause teaches nothing when the fix does not work. The
- *   one-line check (`icacls <dir>`, looking for an ACE that names the caller's
- *   own SID and grants `(F)`) separates "Modify-only directory" from "the
- *   documented prerequisite is wrong", which is the open question upstream.
+ * - **The ACL failure** (`acl-provisioning`) *is* fixable by the caller, so its
+ *   advice names the right the caller is missing and gives the command.
+ *   The reported failures are `ERROR_ACCESS_DENIED` from a *merged* DACL + SACL
+ *   write; the missing right is `WRITE_OWNER` on the directory — an object right
+ *   the caller can grant itself with `icacls`, unelevated. It is **not**
+ *   `SeSecurityPrivilege`, the token privilege the reports naturally reach for;
+ *   `whoami /priv` cannot show the difference, and elevation is the wrong lever.
+ * - **The persistent-shell failure** (`pty-startup`) is *not* fixable by the
+ *   caller — least of all by the model, which has no shell to run anything in.
+ *   So its advice says so and stops: the remedy is a user-side preset choice,
+ *   and the model's instruction is to stop retrying and use its file tools.
+ *   Handing the model a command here would be advice to run something that
+ *   cannot run, and naming a one-shot shell tool would be advice to call a tool
+ *   the failing composition does not mount.
+ *
+ * Both give a **discriminator, not just a remedy**: applying a fix without
+ * confirming the cause teaches nothing when the fix does not work. For the ACL
+ * family that is `icacls <dir>`, looking for an ACE that names the caller's own
+ * SID and grants `(F)` — which separates "Modify-only directory" from "the
+ * documented prerequisite is wrong", the open question upstream. For the PTY
+ * family it is the **effective sandbox mode**, which is why that advisory is
+ * only ever built with the mode the call actually ran under.
  *
  * @module
  */
 
-import type { ProvisioningFailure } from './signature.js'
+import type { ProvisioningFailure, PtyStartupFailure, RecognizedFailure } from './signature.js'
 import { failureLine } from './signature.js'
+import type { SandboxModeName } from './mode.js'
 
-/** The upstream threads this advisory is a stopgap for. */
-export const DISCUSSIONS = '#7538 / #7622 / #7646'
+/** The upstream threads the ACL advisory is a stopgap for. */
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646'
+
+/** The upstream thread the persistent-shell advisory is a stopgap for. */
+export const PTY_DISCUSSIONS = '#7638'
 
 /** The documented prerequisite, quoted from the backend's README. */
 export const PREREQUISITE = 'granted directories must be caller-owned and grant `WRITE_OWNER`'
 
+/**
+ * Where a user's own preset changes actually live.
+ *
+ * This is deliberately **not** the legacy `$DSH_HOME/.agent-presets/<id>/`
+ * directory: that shape predates declarative presets and **nothing reads it any
+ * more** (the registry "neither scans directories nor accepts preset paths").
+ * A preset is a `@deepseek-ai/dsh-agent-preset` row, and changing one means
+ * overriding or inserting that row in a patch layer, which is what this path
+ * names. Advising a folder the harness stopped reading would be the same defect
+ * this plugin exists to answer — a remedy that does not work, delivered
+ * confidently.
+ */
+export const PROFILE_PATCH = '$DSH_HOME/profiles/<profile>/cordis.patch.yml'
+
+/** The machine-wide patch layer, for a change that should hold in every profile. */
+export const GLOBAL_PATCH = '$DSH_HOME/cordis.patch.yml'
+
+/** The row id the shipped `minimal` preset is declared under. */
+export const MINIMAL_PRESET_ROW = 'preset-minimal'
+
+/** The one-shot shell tool the `standard` preset mounts on Windows. */
+export const ONE_SHOT_SHELL = '@deepseek-ai/dsh-tool-pwsh'
+
 /** Placeholder the user replaces with the directory the error named. */
 const PLACEHOLDER = '<the directory from the error line above>'
+
+/** What the caller knows about the failing call, beyond the failure text. */
+export interface AdvisoryContext {
+  /** URL quoted in place of the discussions list; optional. */
+  readonly href?: string
+  /** The tool whose call failed, quoted back so the advice is about that call. */
+  readonly tool?: string
+  /**
+   * The sandbox mode the failing call ran under. Required by the
+   * `pty-startup` family — the whole diagnosis is the mode — and unused by the
+   * ACL family.
+   */
+  readonly mode?: SandboxModeName
+}
 
 /**
  * The diagnosis paragraph for one class of failure.
@@ -67,13 +120,34 @@ function diagnosis(failure: ProvisioningFailure): string {
 
 /**
  * Build the advisory attached to the failing tool result.
+ *
+ * The family decides everything: one function so a caller does not have to
+ * remember which family needs which fact, and so the mode requirement of the
+ * PTY family is enforced by construction rather than by convention.
+ * @param failure - the recognized failure.
+ * @param context - what the caller knows about the failing call.
+ * @returns the user-role notice text, with any remedy ready to paste.
+ * @throws when a PTY failure is advised without its resolved sandbox mode.
+ */
+export function advisoryText(failure: RecognizedFailure, context: AdvisoryContext = {}): string {
+  if (failure.family === 'pty-startup') {
+    if (context.mode === undefined) {
+      throw new Error('sandbox-grant-advisor: the persistent-shell advisory requires the resolved sandbox mode')
+    }
+    return ptyAdvisory(failure, context.mode, context.tool, context.href)
+  }
+  return aclAdvisory(failure, context.href)
+}
+
+/**
+ * Build the advisory for a workspace-provisioning failure.
  * @param failure - the recognized failure.
  * @param href - optional URL shown for the upstream thread.
  * @returns the user-role notice text, with the fix commands ready to paste.
  */
-export function advisoryText(failure: ProvisioningFailure, href?: string): string {
+function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
   const path = failure.path ?? PLACEHOLDER
-  const where = href === undefined ? `tracked upstream (discussions ${DISCUSSIONS})` : `tracked upstream: ${href}`
+  const where = href === undefined ? `tracked upstream (discussions ${ACL_DISCUSSIONS})` : `tracked upstream: ${href}`
   return [
     'Sandbox provisioning failed — no sandboxed command can run in this workspace until its ACL applies.',
     '',
@@ -99,7 +173,67 @@ export function advisoryText(failure: ProvisioningFailure, href?: string): strin
 }
 
 /**
+ * Build the advisory for a persistent-shell startup failure.
+ *
+ * The one thing this text must never do is hand the model a command to run:
+ * there is no shell to run it in. That is why the remedy is addressed to the
+ * user (preset choice), while the model's instruction is to stop — the
+ * alternative, naming a one-shot shell tool, would be advice to call a tool the
+ * failing composition does not mount (`minimal` mounts exactly one platform
+ * shell, the persistent PTY: the design note
+ * `.agents/notes/implemented/simplification/2026-09-03-minimal-profiles-persistent-shell-only.md`).
+ * @param failure - the recognized failure.
+ * @param mode - the resolved sandbox mode the failing call ran under.
+ * @param tool - the tool whose call failed, when the caller knows it.
+ * @param href - optional URL shown for the upstream thread.
+ * @returns the user-role notice text.
+ */
+function ptyAdvisory(failure: PtyStartupFailure, mode: SandboxModeName, tool?: string, href?: string): string {
+  const where = href === undefined ? `tracked upstream (discussion ${PTY_DISCUSSIONS})` : `tracked upstream: ${href}`
+  const call = tool === undefined ? 'This tool' : `The \`${tool}\` tool`
+  return [
+    'Persistent shell failed to start — command execution is unavailable in this session, and retrying cannot fix it.',
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}`,
+    '',
+    `${call} is a PERSISTENT PTY session (a shell that stays alive between calls), and this session's sandbox mode is`,
+    `\`${mode}\` — not \`danger-full-access\`. A confining mode spawns the shell through the sandbox, and there the`,
+    'terminal backend cannot create the pseudo-console at all, so the child exits before its first prompt. The same',
+    'shell works under `danger-full-access`, and the one-shot shell tool works under the same confining mode:',
+    'persistent PTY × confining sandbox is the combination that fails.',
+    '',
+    'Do NOT retry, and do not look for a command that fixes it: every attempt will fail identically, and there is no',
+    'shell to run a command in. Use your file read/write tools instead, and hand the choice below to the user.',
+    '',
+    'What unblocks the session — the user\'s decision, not the model\'s:',
+    '  1. switch the agent preset to `standard`, whose shell tool is a one-shot subprocess (no PTY) and works',
+    '     under the sandbox; or',
+    `  2. override the \`${MINIMAL_PRESET_ROW}\` row in your profile patch — \`${PROFILE_PATCH}\`, or`,
+    `     \`${GLOBAL_PATCH}\` for every profile — replacing its \`persistent-shell\` group with`,
+    `     \`${ONE_SHOT_SHELL}\` (a one-shot subprocess, no PTY); the patch layer is yours, so an upgrade`,
+    '     will not overwrite it; or',
+    '  3. run the session with `danger-full-access`, which drops the very confinement the sandbox exists to give.',
+    '     Prefer 1 or 2.',
+    '',
+    'How to read this: the failure names no cause and points at no remedy, so the diagnosis is delivered here instead.',
+    'This is a stopgap, ' + where + '. Unless the mode is `danger-full-access`, this plugin stays silent, because a',
+    'shell can fail to start for other reasons and a confident wrong cause is worse than no answer.',
+  ].join('\n')
+}
+
+/**
  * Build the pre-dispatch denial for the optional fail-fast half.
+ *
+ * The blocking half is deliberately **ACL-only**, and this function's parameter
+ * type is where that is enforced. The PTY family gets an advisory and nothing
+ * else, for a reason that is about the remedy rather than about the failure:
+ * the ACL remedy is a command the user can run *while the session continues*,
+ * so refusing further identical calls cannot make the session unfinishable —
+ * spending the budget always lets the call through, and a repaired environment
+ * is discovered by exactly that. The PTY remedy is a preset swap, which happens
+ * between sessions; refusing calls could only pad a session that is already
+ * unable to do the thing being refused.
  * @param failure - the recognized failure.
  * @param observed - how many provisioning failures this agent has produced.
  * @param denial - this denial's 1-based ordinal.

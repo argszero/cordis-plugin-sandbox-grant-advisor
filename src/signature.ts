@@ -1,5 +1,8 @@
 /**
- * Recognize the Windows ACL provisioning failure that has no path forward.
+ * Recognize the two environment failures this plugin explains, and refuse
+ * everything else.
+ *
+ * ## The ACL provisioning failure (`acl-provisioning`)
  *
  * The harness's Windows sandbox provisions a workspace by writing the
  * directory's DACL and its mandatory-integrity label in **one**
@@ -10,7 +13,7 @@
  * it. Every sandboxed command then fails the same way, forever, because the
  * grant is materialized lazily and nothing is cached on the failure path.
  *
- * Recognizing the string is therefore the whole job of this module, and the
+ * Recognizing the string is therefore the whole job of this half, and the
  * recognition is deliberately narrow:
  *
  * - **Only the two `...NamedSecurityInfoW` operations are classified.** Their
@@ -27,6 +30,28 @@
  *   the advisory can quote the exact line the model and the user are looking
  *   at, and the path can be re-used in the fix command.
  *
+ * ## The persistent-shell startup failure (`pty-startup`)
+ *
+ * `dsh-terminal-bash` throws `PTY shell exited during startup` when the shell
+ * it spawned through the sandbox exits before reaching its first prompt
+ * (`src/session.ts` and `src/index.ts`, both on the same `waitReason ===
+ * 'session_exit'` branch). The text names no cause and, under the `minimal`
+ * preset — whose only shell tool is a persistent PTY — there is no other shell
+ * tool left to fall back on, so the model reads it as "the command failed" and
+ * retries forever. #7638 is the report: 33 consecutive failures under
+ * `workspace-write`, none under `danger-full-access`, with the reporter's own
+ * three-arm control showing the sandbox mode is the discriminator.
+ *
+ * This family is recognized on an **exact line**, not on a substring, and that
+ * is deliberate. The producer's message has no detail field at all — the whole
+ * message is the sentence — so anything that merely *contains* the phrase is
+ * quoting it (a transcript, a log a failing command printed, a pasted issue
+ * body) rather than producing it. The sibling throw on the same branch, `PTY
+ * shell did not reach readiness before startup timeout`, is **not** classified
+ * here: it means the shell started and then did not reach a prompt, which is a
+ * different cause space (a slow or blocked shell) with a different remedy, and
+ * a classifier that names a wrong cause is worse than one that stays silent.
+ *
  * @module
  */
 
@@ -39,8 +64,17 @@ export type FailureClass =
   /** `GetNamedSecurityInfoW` failed: the security descriptor could not even be read. */
   | 'read-denied'
 
+/** The environment failure family a recognized failure belongs to. */
+export type FailureFamily =
+  /** The Windows sandbox could not provision its workspace (ACL / mandatory label). */
+  | 'acl-provisioning'
+  /** The persistent PTY shell could not start under a confining sandbox mode. */
+  | 'pty-startup'
+
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'acl-provisioning'
   /** Which diagnosis follows from the api/code pair. */
   readonly klass: FailureClass
   /** The API whose checked result failed, exactly as the producer names it. */
@@ -54,6 +88,25 @@ export interface ProvisioningFailure {
   /** The directory the detail names, when it has that shape. */
   readonly path?: string
 }
+
+/** The exact text `dsh-terminal-bash` throws when the shell exits during startup. */
+export const PTY_STARTUP_EXIT = 'PTY shell exited during startup'
+
+/**
+ * The persistent-shell startup failure. It carries no producer fields: the
+ * producer's entire message is {@link PTY_STARTUP_EXIT}, and what makes the
+ * diagnosis actionable (the effective sandbox mode) comes from the policy
+ * resolver at the call site rather than from the error text.
+ */
+export interface PtyStartupFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'pty-startup'
+  /** The producer's message, kept as the constant so nothing can drift. */
+  readonly line: string
+}
+
+/** Any failure this plugin recognizes, tagged by family. */
+export type RecognizedFailure = ProvisioningFailure | PtyStartupFailure
 
 /**
  * The producer's format is fixed by `Win32Error`
@@ -79,7 +132,7 @@ function splitDetail(detail: string): { label?: string, path?: string } {
 }
 
 /**
- * Classify one failure message.
+ * Classify one failure message against the ACL family.
  * @param message - the failure text, from the result's `error.message` or its rendered content.
  * @returns the recognized failure, or undefined when this is not a provisioning failure.
  */
@@ -93,15 +146,39 @@ export function classifyProvisioningFailure(message: string): ProvisioningFailur
   const klass: FailureClass = api === 'GetNamedSecurityInfoW'
     ? 'read-denied'
     : code === ACCESS_DENIED ? 'apply-denied' : 'apply-other'
-  return { klass, api, win32Code: code, detail, ...splitDetail(detail) }
+  return { family: 'acl-provisioning', klass, api, win32Code: code, detail, ...splitDetail(detail) }
+}
+
+/**
+ * Classify one failure message as the persistent-shell startup failure.
+ *
+ * Recognition is by **whole line**, because the producer's message is a bare
+ * sentence with no fields of its own: a line equal to
+ * {@link PTY_STARTUP_EXIT} — with only the `Error: ` envelope a tool result adds
+ * in front of it — is the producer. A longer line that happens to contain the
+ * sentence is something quoting it (a transcript, a log the failing command
+ * printed, a pasted issue body), and advising about the sandbox there would be
+ * advice about the wrong thing.
+ * @param message - the failure text, from the result's `error.message` or its rendered content.
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyPtyStartupFailure(message: string): PtyStartupFailure | undefined {
+  for (const raw of message.split('\n')) {
+    const line = raw.trim()
+    if (line === PTY_STARTUP_EXIT || line === `Error: ${PTY_STARTUP_EXIT}`) {
+      return { family: 'pty-startup', line: PTY_STARTUP_EXIT }
+    }
+  }
+  return undefined
 }
 
 /**
  * The one-line failure the producer wrote, for quoting back verbatim.
  * @param failure - a recognized failure.
- * @returns the message text a `Win32Error` would have produced.
+ * @returns the message text the producing layer would have produced.
  */
-export function failureLine(failure: ProvisioningFailure): string {
+export function failureLine(failure: RecognizedFailure): string {
+  if (failure.family === 'pty-startup') return failure.line
   const suffix = failure.detail.length === 0 ? '' : `: ${failure.detail}`
   return `${failure.api} failed (Win32 ${failure.win32Code})${suffix}`
 }

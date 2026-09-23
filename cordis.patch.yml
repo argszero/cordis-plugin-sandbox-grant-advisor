@@ -45,6 +45,24 @@
 # is off by default on purpose: it may only refuse a call it has watched fail in
 # this environment, and it is bounded by `maxDenials`, because a plugin that can
 # stop command execution must never be the reason a session cannot finish.
+#
+# A SECOND family is recognized on the same seam (#7638): with the `minimal`
+# preset and a confining sandbox mode, every shell call dies instantly with
+#
+#   PTY shell exited during startup
+#
+# The terminal backend cannot create the pseudo-console inside the sandbox, so
+# the child exits before its first prompt; retrying never helps and `minimal`
+# mounts no fallback shell tool. That advisory states the resolved mode, tells
+# the model to STOP rather than retry, and hands the user a preset choice — it
+# never names a command to run (there is no shell to run it in) and never names
+# a shell tool the failing composition does not mount. It is sent only when the
+# mode the call actually ran under confines; otherwise the failure is left
+# untouched and the host log says so once (silence alone would read as "the
+# sandbox is not the cause", which this plugin cannot claim). The blocking half
+# above deliberately does NOT cover this family: its remedy is a patch-layer
+# change the user makes between sessions, not a command that repairs the
+# running one.
 
 - insert:
     - id: sandbox-grant-advisor

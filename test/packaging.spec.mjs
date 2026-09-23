@@ -154,7 +154,7 @@ test('the README quotes the range it is describing, in full', () => {
 
 test('the tarball carries the entry, its modules, the bundle patch, and the type declarations', () => {
   const paths = packedPaths()
-  for (const required of ['package.json', 'lib/index.js', 'lib/signature.js', 'lib/advice.js', 'lib/state.js', 'lib/types/index.d.ts', 'lib/types/signature.d.ts', 'cordis.patch.yml', 'README.md', 'LICENSE']) {
+  for (const required of ['package.json', 'lib/index.js', 'lib/signature.js', 'lib/advice.js', 'lib/state.js', 'lib/mode.js', 'lib/types/index.d.ts', 'lib/types/signature.d.ts', 'lib/types/mode.d.ts', 'cordis.patch.yml', 'README.md', 'LICENSE']) {
     assert.ok(paths.has(required), `npm pack omits ${required} (declared in "files"): ${[...paths].join(', ')}`)
   }
   assert.ok(![...paths].some(path => path.startsWith('test/') || path.startsWith('src/') || path.startsWith('scripts/')), 'source, tests and scripts stay unpublished')

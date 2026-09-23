@@ -1,7 +1,7 @@
 {
   "name": "@argszero/cordis-plugin-sandbox-grant-advisor",
-  "description": "Turns the Windows sandbox's ACL provisioning failure into a diagnosis with a path forward. Three reports (#7538, #7622, #7646) describe one signature — every sandboxed command fails before it runs with `SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace>)` — and the error names neither the missing right nor a remedy, so the loop burns tokens and sessions escape into danger-full-access. The host-side grant is materialized lazily and caches nothing on the failure path, so the same failure repeats per command. This plugin observes the public `tools/post-execute` waterfall, classifies that signature (only the two `...NamedSecurityInfoW` operations, keeping the Win32 code and the producer's own detail verbatim), and attaches ONE durable user-role advisory per agent through `additionalContexts`: the missing right is WRITE_OWNER on the directory (an object right the caller can self-grant), not SeSecurityPrivilege and not elevation; the directory's current ACL is the discriminator; the fix is one unelevated `icacls` line. An optional, off-by-default `enforceAfter` refuses an identical call this plugin has watched fail, bounded by `maxDenials`. It never edits an ACL and never elevates, and it complements repeat-guard-escalation, which keys on call identity rather than on the environment signature.",
-  "version": "0.1.0",
+  "description": "Turns two sandbox environment failures that name neither their cause nor a remedy into a diagnosis with a path forward. Family 1, the Windows workspace ACL: three reports (#7538, #7622, #7646) of one signature — every sandboxed command fails before it runs with `SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace>)`, because the merged DACL + mandatory-label write needs WRITE_OWNER on the directory (an object right the caller can self-grant), not SeSecurityPrivilege and not elevation; the host grant is materialized lazily and caches nothing on the failure path, so the same failure repeats per command. Family 2, the persistent shell (#7638): with the `minimal` preset under a confining sandbox mode every shell call dies instantly with `PTY shell exited during startup` because the terminal backend cannot create the pseudo-console inside the sandbox, retrying never helps, and `minimal` mounts no fallback shell tool. The plugin observes the public `tools/post-execute` waterfall, classifies both signatures narrowly (only the two `...NamedSecurityInfoW` operations; the PTY message matched on a whole line, never as a substring, and only under a mode the policy resolver reports as confining), and attaches ONE durable user-role advisory per agent per family through `additionalContexts`. The ACL advisory names the missing right, the discriminator, and the unelevated `icacls` fix; the PTY advisory names the failing combination, states the resolved mode, tells the model to stop rather than retry, and hands the user-side preset choice over — it never names a shell tool the failing composition does not mount. An optional, off-by-default `enforceAfter` refuses an identical ACL call this plugin has watched fail, bounded by `maxDenials`; the blocking half is ACL-only by design. It never edits an ACL, never elevates, and never changes a preset or a mode, and it complements repeat-guard-escalation, which keys on call identity rather than on the environment signature.",
+  "version": "0.2.0",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -67,7 +67,8 @@
     "pretest": "tsc",
     "test": "node --test \"test/*.spec.mjs\"",
     "test:probe-lines": "node scripts/probe-lines.mjs",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "tsc",
+    "test:inject": "node scripts/inject-defects.mjs"
   },
   "engines": {
     "node": "^22.19 || >=24"

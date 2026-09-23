@@ -1,118 +1,32 @@
 /**
- * Integration: mount the plugin on a REAL cordis context together with the REAL
- * `dsh-tools` ToolRuntime, register fixtures, and drive calls through the actual
- * `tools/pre-execute` / `tools/post-execute` waterfalls.
+ * The reported ACL failure, end to end: mount the plugin on the shared harness
+ * (`./harness.mjs` — a real cordis context, the real `dsh-tools` ToolRuntime,
+ * and the real tool waterfalls) and drive calls through the actual
+ * `tools/pre-execute` / `tools/post-execute` seams.
  *
- * What this shape proves that a unit arm cannot: the listener is wired to the
- * seam, the advisory really rides `additionalContexts` on the settled result
- * (the channel the agent loop turns into a durable user-role message), and a
- * denial really stops the tool body from running.
- *
- * What it cannot prove, and does not claim: the Windows ACL path itself. The
- * fixtures throw the producer's exact error text — taken from
- * `Win32Error` (`packages/subprocess/win32-process/src/errors.ts`) — because
- * that text is the plugin's entire input on every platform.
+ * This suite owns the `acl-provisioning` family, in every form: recognition
+ * through the seam, once-per-agent delivery, the error gate, the watching
+ * lists, config validation, and both arms of the optional fail-fast half.
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { Context } from '@deepseek-ai/cordis'
-import systemPromptPlugin from '@deepseek-ai/dsh-system-prompt'
-import toolsPlugin from '@deepseek-ai/dsh-tools'
 import * as plugin from '../lib/index.js'
-
-/** The exact failure three reports describe. */
-const REPORTED = 'SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'
-
-/** How many tool bodies actually ran, per fixture name. */
-const ran = new Map()
-
-/** A body counter that survives a fixture being called through the pipeline. */
-function count(toolName) {
-  ran.set(toolName, (ran.get(toolName) ?? 0) + 1)
-}
-
-/** One registrable tool whose body returns a value. */
-function okTool(toolName, value) {
-  return {
-    name: toolName,
-    description: 'integration fixture',
-    parameters: { type: 'object', properties: {} },
-    output: { schema: { type: 'string' }, render: (_args, settled) => [{ type: 'text', text: settled }] },
-    execute: () => {
-      count(toolName)
-      return Promise.resolve(value)
-    },
-  }
-}
-
-/** One registrable tool whose body always throws `message`. */
-function failingTool(toolName, message) {
-  return {
-    name: toolName,
-    description: 'always-failing integration fixture',
-    parameters: { type: 'object', properties: {} },
-    output: { schema: { type: 'string' }, render: (_args, settled) => [{ type: 'text', text: settled }] },
-    execute: () => {
-      count(toolName)
-      return Promise.reject(new Error(message))
-    },
-  }
-}
-
-const signal = () => new AbortController().signal
-
-/** One agent identity, memoized per id: the plugin keys its state on the object. */
-const agents = new Map()
-function who(id) {
-  if (!agents.has(id)) agents.set(id, { id, session: { id } })
-  return agents.get(id)
-}
-
-/**
- * Mount the real registry plus this plugin.
- * @param config - plugin config to forward; omitted → defaults.
- * @param fixtures - tool definitions to register after the plugin is mounted.
- * @returns the context, the captured log messages, and the tool names.
- */
-async function world(config, fixtures) {
-  ran.clear()
-  const ctx = new Context()
-  const logged = []
-  // `levels.default` is the highest level an exporter admits (2 = WARN).
-  ctx.logger.exporter({ levels: { default: 2 }, export: message => { logged.push(message) } })
-  await ctx.plugin(systemPromptPlugin, {})
-  await ctx.plugin(toolsPlugin)
-  await ctx.plugin({ name: plugin.name, apply: c => { plugin.apply(c, config ?? {}) } })
-  for (const fixture of fixtures) ctx.tools.register(fixture)
-  return { ctx, logged }
-}
-
-/** Drive one call through the real pipeline. */
-function call(ctx, toolName, args = {}, agent = who('s1')) {
-  return ctx.tools.execute({ name: toolName, arguments: args, signal: signal(), agent })
-}
-
-/** The contexts one settled result carries. */
-function contexts(result) {
-  return result.additionalContexts ?? []
-}
-
-/** One settled result's text. */
-function text(result) {
-  return result.content.filter(block => block.type === 'text').map(block => block.text).join('\n')
-}
-
-/**
- * The captured log as one string.
- *
- * A message carries the format string plus its arguments, unformatted — the
- * exporter renders them — so the arguments are joined in too.
- */
-function logText(logged) {
-  return logged.map(message => message.args.map(value => String(value)).join(' ')).join('\n')
-}
+import {
+  call,
+  contexts,
+  failingTool,
+  flakyTool,
+  logText,
+  okTool,
+  REPORTED,
+  runs,
+  signal,
+  text,
+  who,
+  world,
+} from './harness.mjs'
 
 test('exposes the documented plugin surface', () => {
   assert.equal(plugin.name, 'sandbox-grant-advisor')
@@ -215,7 +129,7 @@ test('with the default config the plugin never blocks anything', async () => {
     assert.match(text(result), /SetNamedSecurityInfoW failed/, 'the tool really ran and really failed')
     assert.doesNotMatch(text(result), /Blocked by sandbox-grant-advisor/)
   }
-  assert.equal(ran.get('bash'), 5, 'the blocking half is off unless asked for')
+  assert.equal(runs('bash'), 5, 'the blocking half is off unless asked for')
 })
 
 test('the fail-fast half refuses an identical call it has watched fail, and only that', async () => {
@@ -223,23 +137,23 @@ test('the fail-fast half refuses an identical call it has watched fail, and only
   // Two real failures teach the plugin that this call, in this environment, cannot run.
   assert.equal((await call(ctx, 'bash', { command: 'ls' })).isError, true)
   assert.equal((await call(ctx, 'bash', { command: 'ls' })).isError, true)
-  assert.equal(ran.get('bash'), 2)
+  assert.equal(runs('bash'), 2)
 
   const blocked = await call(ctx, 'bash', { command: 'ls' })
   assert.equal(blocked.isError, true)
-  assert.equal(ran.get('bash'), 2, 'the refused call never reached the body')
+  assert.equal(runs('bash'), 2, 'the refused call never reached the body')
   assert.match(text(blocked), /Blocked by sandbox-grant-advisor/)
   assert.match(text(blocked), /already failed 2 times/)
   assert.match(text(blocked), /automatic block 1 of 2/)
 
   // A different command is a different attempt: it is not the call we watched fail.
   const other = await call(ctx, 'bash', { command: 'pwd' })
-  assert.equal(ran.get('bash'), 3, 'an untried call still reaches the body')
+  assert.equal(runs('bash'), 3, 'an untried call still reaches the body')
 
   // The budget is bounded: past it the identical call proceeds again.
   assert.match(text(await call(ctx, 'bash', { command: 'ls' })), /automatic block 2 of 2/)
   const allowed = await call(ctx, 'bash', { command: 'ls' })
-  assert.equal(ran.get('bash'), 4, 'the guard must never make a session unfinishable')
+  assert.equal(runs('bash'), 4, 'the guard must never make a session unfinishable')
   assert.match(text(allowed), /SetNamedSecurityInfoW failed/, 'and the environment still reports itself')
 })
 
@@ -261,28 +175,18 @@ test('the guard never counts its own denial as an environment failure', async ()
 test('a call that finally succeeds stops being a denial target', async () => {
   // The environment can start working mid-session (the user fixes the ACL). The
   // plugin must notice, or it would keep refusing a call that now works.
-  let fail = true
-  const flaky = {
-    name: 'bash',
-    description: 'fails until the environment is repaired',
-    parameters: { type: 'object', properties: {} },
-    output: { schema: { type: 'string' }, render: (_args, settled) => [{ type: 'text', text: settled }] },
-    execute: () => {
-      count('bash')
-      return fail ? Promise.reject(new Error(REPORTED)) : Promise.resolve('ok')
-    },
-  }
-  const { ctx } = await world({ enforceAfter: 2, maxDenials: 2 }, [flaky])
+  const flaky = flakyTool('bash', REPORTED)
+  const { ctx } = await world({ enforceAfter: 2, maxDenials: 2 }, [flaky.definition])
   await call(ctx, 'bash', { command: 'ls' })
   await call(ctx, 'bash', { command: 'ls' })
   // The budget is what lets a repaired environment be discovered at all: two
   // refusals, and then the very call under suspicion gets to run again.
   assert.match(text(await call(ctx, 'bash', { command: 'ls' })), /automatic block 1 of 2/)
   assert.match(text(await call(ctx, 'bash', { command: 'ls' })), /automatic block 2 of 2/)
-  fail = false
+  flaky.state.fail = false
   const success = await call(ctx, 'bash', { command: 'ls' })
   assert.equal(success.isError, false, 'a repaired environment must be allowed to proceed')
-  fail = true
+  flaky.state.fail = true
   const after = await call(ctx, 'bash', { command: 'ls' })
   assert.equal(after.isError, true)
   assert.match(text(after), /SetNamedSecurityInfoW failed/, 'a fresh failure re-earns its own attempt')
