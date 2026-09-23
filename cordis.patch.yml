@@ -1,0 +1,51 @@
+# The @argszero/cordis-plugin-sandbox-grant-advisor bundle patch: mount and go.
+#
+# Three reports (#7538, #7622, #7646) describe one Windows failure with no way
+# forward: the host-side write grant for a sandboxed workspace cannot be
+# applied, so every sandboxed command fails before it runs with
+#
+#   SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace>)
+#
+# The grant is materialized lazily on the first confined call and caches
+# nothing when it throws, so the failure repeats per command (850 calls across
+# 39 sessions in #7622; 52,588 output tokens with no output in #7538). The
+# error names neither the missing right nor a remedy, which is why sessions
+# escape into danger-full-access or die on the model's output cap.
+#
+# This plugin does not repair ACLs. It observes the public
+# `tools/post-execute` waterfall, recognizes that signature (and only that
+# signature — see the README for what it deliberately refuses to explain), and
+# attaches ONE durable user-role advisory per agent through
+# `additionalContexts`, so the model gets the diagnosis in the same step as the
+# failure:
+#
+#   - the missing right is WRITE_OWNER on the directory — an object right the
+#     caller can grant itself, not SeSecurityPrivilege and not elevation
+#     (the manifest half of the merged DACL+SACL write is what needs it);
+#   - the directory's own ACL is the discriminator (`icacls <dir>`, looking for
+#     an ACE that names your SID with (F));
+#   - the remedy is one unelevated line:
+#       icacls "<dir>" /grant "$env:USERNAME:(OI)(CI)F"
+#
+# Optional config:
+#
+#   - set:
+#       - id: sandbox-grant-advisor
+#         config:
+#           # 0 (default) = advisory only: this plugin never blocks a call.
+#           # Set it to enable the bounded fail-fast half: once the environment
+#           # has failed this way N times, an identical call this plugin has
+#           # WATCHED fail is refused before dispatch.
+#           enforceAfter: 0
+#           maxDenials: 2            # then step aside, so the session can finish
+#           exclude: []              # tool-name wildcards never watched
+#           href: ''                 # optional URL quoted in the advisory
+#
+# The advisory half is always on and never blocks anything. The blocking half
+# is off by default on purpose: it may only refuse a call it has watched fail in
+# this environment, and it is bounded by `maxDenials`, because a plugin that can
+# stop command execution must never be the reason a session cannot finish.
+
+- insert:
+    - id: sandbox-grant-advisor
+      name: '@argszero/cordis-plugin-sandbox-grant-advisor'

@@ -1,0 +1,75 @@
+{
+  "name": "@argszero/cordis-plugin-sandbox-grant-advisor",
+  "description": "Turns the Windows sandbox's ACL provisioning failure into a diagnosis with a path forward. Three reports (#7538, #7622, #7646) describe one signature — every sandboxed command fails before it runs with `SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace>)` — and the error names neither the missing right nor a remedy, so the loop burns tokens and sessions escape into danger-full-access. The host-side grant is materialized lazily and caches nothing on the failure path, so the same failure repeats per command. This plugin observes the public `tools/post-execute` waterfall, classifies that signature (only the two `...NamedSecurityInfoW` operations, keeping the Win32 code and the producer's own detail verbatim), and attaches ONE durable user-role advisory per agent through `additionalContexts`: the missing right is WRITE_OWNER on the directory (an object right the caller can self-grant), not SeSecurityPrivilege and not elevation; the directory's current ACL is the discriminator; the fix is one unelevated `icacls` line. An optional, off-by-default `enforceAfter` refuses an identical call this plugin has watched fail, bounded by `maxDenials`. It never edits an ACL and never elevates, and it complements repeat-guard-escalation, which keys on call identity rather than on the environment signature.",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/argszero/cordis-plugin-sandbox-grant-advisor.git"
+  },
+  "homepage": "https://github.com/argszero/cordis-plugin-sandbox-grant-advisor#readme",
+  "bugs": {
+    "url": "https://github.com/argszero/cordis-plugin-sandbox-grant-advisor/issues"
+  },
+  "keywords": [
+    "cordis",
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "sandbox",
+    "windows",
+    "acl",
+    "win32",
+    "diagnostics",
+    "guard"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": ">=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-llm": ">=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-llm": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.7-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.7-rc.1",
+    "@types/node": "^22.10.2",
+    "semver": "^7.6.0",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "pretest": "tsc",
+    "test": "node --test \"test/*.spec.mjs\"",
+    "test:probe-lines": "node scripts/probe-lines.mjs",
+    "prepublishOnly": "tsc"
+  },
+  "engines": {
+    "node": "^22.19 || >=24"
+  }
+}
