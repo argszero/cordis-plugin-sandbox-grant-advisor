@@ -109,6 +109,44 @@ test('an href replaces the thread line without dropping the fix', () => {
   assert.match(text, /WRITE_OWNER/)
 })
 
+test('the two remedies that look right and are not are named, with the reason each fails', () => {
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  // Both came from #7720, quoted with the directory the error named.
+  assert.match(text, /takeown \/F "D:\\ws" \/R \/D Y/)
+  assert.match(text, /icacls "D:\\ws" \/reset \/T \/C/)
+  // The reasons are different, and each is the fact that makes the command fail:
+  // the owner's implicit rights, and what `/reset` puts back.
+  assert.match(text, /ownership's implicit rights are READ_CONTROL and WRITE_DAC only/)
+  assert.match(text, /The owner does not implicitly hold WRITE_OWNER/)
+  assert.match(text, /restores inheritance, and inheritance is what supplied the Modify-only ACE/)
+  // Both are still promised as *not* the fix, never as the remedy.
+  assert.match(text, /What will NOT fix it/)
+})
+
+test('the non-fix section is emitted only where its claim is true', () => {
+  // `read-denied` wants READ_CONTROL, which taking ownership does carry — so the
+  // section would be false there, not merely unhelpful.
+  const read = advisoryText(classifyProvisioningFailure('GetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'))
+  assert.doesNotMatch(read, /takeown/)
+  assert.doesNotMatch(read, /reset \/T \/C/)
+  assert.doesNotMatch(read, /What will NOT fix it/)
+  // `apply-other` says the missing-rights story does not apply verbatim, so a
+  // section presupposing it would contradict the paragraph above it.
+  const other = advisoryText(classifyProvisioningFailure('SetNamedSecurityInfoW failed (Win32 1332): grantWrite(D:\\ws)'))
+  assert.doesNotMatch(other, /takeown/)
+  assert.doesNotMatch(other, /What will NOT fix it/)
+})
+
+test('the non-fix section follows the placeholder rule too', () => {
+  const failure = classifyProvisioningFailure('SetNamedSecurityInfoW failed (Win32 5)')
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  assert.match(text, /takeown \/F "<the directory from the error line above>" \/R \/D Y/)
+  assert.doesNotMatch(text, /takeown \/F ""/)
+})
+
 test('each class explains itself instead of borrowing another class\'s story', () => {
   const denied = advisoryText(classifyProvisioningFailure(REPORTED))
   const other = advisoryText(classifyProvisioningFailure('SetNamedSecurityInfoW failed (Win32 1332): grantWrite(D:\\ws)'))

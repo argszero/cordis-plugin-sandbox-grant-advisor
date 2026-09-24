@@ -58,6 +58,18 @@ const MUTATIONS = [
     edits: [['?? classifyPtyStartupFailure(result.error.message)', '?? classifyPtyStartupFailure(failureText(result))']],
   },
   {
+    name: 'the non-fix section is emitted for the wrong class (the gate names read-denied)',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["if (failure.klass !== 'apply-denied') return []", "if (failure.klass !== 'read-denied') return []"]],
+  },
+  {
+    name: 'the non-fix section presents itself as the remedy instead of the thing that does not work',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["'What will NOT fix it — both look like the right move, and both were tried and reported:',", "'If that fails, try one of these instead:',"]],
+  },
+  {
     name: 'the ACL advisory is delivered on every failure instead of once per agent',
     file: 'src/index.ts',
     arms: 'plugin.spec.mjs',

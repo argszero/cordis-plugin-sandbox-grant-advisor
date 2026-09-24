@@ -37,7 +37,7 @@ import { failureLine } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720'
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
@@ -67,6 +67,22 @@ export const MINIMAL_PRESET_ROW = 'preset-minimal'
 
 /** The one-shot shell tool the `standard` preset mounts on Windows. */
 export const ONE_SHOT_SHELL = '@deepseek-ai/dsh-tool-pwsh'
+
+/**
+ * The two remedies that look like the fix and are not.
+ *
+ * Both were applied by the reporter of `#7720` before finding the one that
+ * works, and both are the *natural* reach: making yourself the owner and
+ * resetting the directory's ACL are how one normally repairs a Windows
+ * permission problem. They fail here for two different reasons, and naming the
+ * reason is what makes this section worth its lines — a reader who already
+ * tried them learns why, and a reader who has not is spared the attempt. See
+ * {@link nonFixes} for when this is emitted.
+ */
+export const NOT_FIXES = [
+  'takeown /F "<dir>" /R /D Y',
+  'icacls "<dir>" /reset /T /C',
+] as const
 
 /** Placeholder the user replaces with the directory the error named. */
 const PLACEHOLDER = '<the directory from the error line above>'
@@ -119,6 +135,37 @@ function diagnosis(failure: ProvisioningFailure): string {
 }
 
 /**
+ * The "this is not the fix" lines for one class of failure.
+ *
+ * Emitted only for `apply-denied`, the class whose whole diagnosis is the
+ * missing `WRITE_OWNER` right — because only there is the claim true:
+ *
+ * - `read-denied` wants `READ_CONTROL`, and taking ownership *does* carry it,
+ *   so calling `takeown` a non-fix there would be false.
+ * - `apply-other` already says the missing-rights story does not apply
+ *   verbatim, so a section that presupposes it would contradict its own
+ *   diagnosis.
+ *
+ * A negative claim still has to be earned: the failure to avoid is advice that
+ * is confidently wrong in the other direction.
+ * @param failure - the recognized provisioning failure.
+ * @param path - the directory the error named, or the placeholder.
+ * @returns the section's lines, or an empty array for a class it does not fit.
+ */
+function nonFixes(failure: ProvisioningFailure, path: string): string[] {
+  if (failure.klass !== 'apply-denied') return []
+  return [
+    'What will NOT fix it — both look like the right move, and both were tried and reported:',
+    `  takeown /F "${path}" /R /D Y`,
+    "    makes you the owner, but ownership's implicit rights are READ_CONTROL and WRITE_DAC only.",
+    '    The owner does not implicitly hold WRITE_OWNER, which is the right this call needs.',
+    `  icacls "${path}" /reset /T /C`,
+    '    restores inheritance, and inheritance is what supplied the Modify-only ACE above.',
+    '',
+  ]
+}
+
+/**
  * Build the advisory attached to the failing tool result.
  *
  * The family decides everything: one function so a caller does not have to
@@ -165,6 +212,7 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     `  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,
     `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)F"`,
     '',
+    ...nonFixes(failure, path),
     'How to read this: the harness documents the prerequisite (' + PREREQUISITE + ') and this',
     'error does not name it yet, so the advice is delivered here instead. This is a stopgap, ' + where + '.',
     'What it is NOT: this plugin neither edits ACLs nor elevates — the command above is yours to run.',

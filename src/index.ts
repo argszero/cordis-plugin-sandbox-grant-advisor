@@ -4,8 +4,8 @@
  *
  * ## The two failures it recognizes
  *
- * **Workspace provisioning (Windows ACL).** Three reports of one signature
- * (`#7538`, `#7622`, `#7646`) describe the same shape: the host-side write grant
+ * **Workspace provisioning (Windows ACL).** Four reports of one signature
+ * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
  * for a sandboxed workspace cannot be applied, every sandboxed command then
  * fails identically **before it runs**, and the error text is a bare Win32 line:
  *
@@ -17,6 +17,13 @@
  * `#7538`). The remedy the backend documents — the directory must grant the
  * caller `WRITE_OWNER` — never reaches the user, so sessions escape into
  * `danger-full-access` or die on the model's output cap.
+ *
+ * `#7720` sharpens where this lands: because the grant is materialized at
+ * sandbox *initialization*, that failure takes **every** shell tool with it, not
+ * one operation — the reporter could not run `netstat` or `icacls` to diagnose
+ * the failure they were looking at. It also contributes the two remedies that
+ * look right and are not (`takeown /R /D Y`, `icacls /reset /T /C`), which the
+ * ACL advisory now names along with the reason each fails.
  *
  * **Persistent shell startup (#7638).** With the `minimal` preset on Windows the
  * only shell tool is a persistent PTY (`dsh-terminal-bash` +
@@ -59,8 +66,9 @@
  *    failure of a family, the failing tool result is enriched with a user-role
  *    notice. For the ACL family it names the missing right (`WRITE_OWNER` on the
  *    directory, not `SeSecurityPrivilege`), gives the unelevated one-line
- *    `icacls` remedy, and gives the discriminator that separates a Modify-only
- *    directory from a wrong prerequisite. For the PTY family it names the
+ *    `icacls` remedy, gives the discriminator that separates a Modify-only
+ *    directory from a wrong prerequisite, and names the two remedies that look
+ *    right and are not (`takeown`, `icacls /reset`), each with its reason. For the PTY family it names the
  *    combination that fails (persistent PTY × a confining mode), states the
  *    resolved mode, says plainly that no command can fix it, and hands the
  *    user-side preset choice over. Both ride `additionalContexts`, so the model

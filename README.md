@@ -30,9 +30,20 @@ stuck.
 
 ### 1. Workspace provisioning — the Windows ACL failure (`acl-provisioning`)
 
-Three reports describe this exact line: [discussion #7538], [discussion #7622],
-[discussion #7646]. In each one every sandboxed command fails the same way,
-before it runs, and the error names neither the missing right nor a remedy.
+Four reports describe this exact line: [discussion #7538], [discussion #7622],
+[discussion #7646], [discussion #7720]. In each one every sandboxed command fails
+the same way, before it runs, and the error names neither the missing right nor
+a remedy.
+
+`#7720` is worth reading for where the failure lands: the grant is materialized
+at sandbox **initialization**, so this is not one refused operation but *every*
+shell tool at once — the reporter could not run `netstat` or even `icacls` to
+diagnose the error they were staring at (on `0.1.5-rc.3` the same directory
+worked, because confinement was skipped silently rather than failing closed).
+They also report the two remedies that look right and are not
+(`takeown /F <dir> /R /D Y`, `icacls <dir> /reset /T /C`), which is why the
+advisory names them with the reason each fails instead of leaving the reader to
+discover it.
 
 The Windows backend provisions a workspace by writing the directory's DACL and
 its mandatory-integrity label in **one** `SetNamedSecurityInfoW` call
@@ -79,6 +90,13 @@ Confirm the cause (unelevated) — `icacls` is a normal user command:
 Fix it (unelevated, one line) and then run the command again:
   PowerShell: icacls "D:\ws" /grant "$env:USERNAME:(OI)(CI)F"
   cmd:        icacls "D:\ws" /grant "%USERNAME%:(OI)(CI)F"
+
+What will NOT fix it — both look like the right move, and both were tried and reported:
+  takeown /F "D:\ws" /R /D Y
+    makes you the owner, but ownership's implicit rights are READ_CONTROL and WRITE_DAC only.
+    The owner does not implicitly hold WRITE_OWNER, which is the right this call needs.
+  icacls "D:\ws" /reset /T /C
+    restores inheritance, and inheritance is what supplied the Modify-only ACE above.
 ```
 
 ### 2. Persistent shell startup (`pty-startup`)
@@ -338,4 +356,5 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7538]: https://github.com/deepseek-ai/deepseek-harness/discussions/7538
 [discussion #7622]: https://github.com/deepseek-ai/deepseek-harness/discussions/7622
 [discussion #7646]: https://github.com/deepseek-ai/deepseek-harness/discussions/7646
+[discussion #7720]: https://github.com/deepseek-ai/deepseek-harness/discussions/7720
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
