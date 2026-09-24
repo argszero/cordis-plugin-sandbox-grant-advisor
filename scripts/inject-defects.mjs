@@ -70,6 +70,21 @@ const MUTATIONS = [
     edits: [["'What will NOT fix it — both look like the right move, and both were tried and reported:',", "'If that fails, try one of these instead:',"]],
   },
   {
+    name: 'the version boundary is withheld from the classes that do not see ERROR_ACCESS_DENIED',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['    versionBoundary(),', "    failure.klass === 'apply-denied' ? versionBoundary() : '',"]],
+  },
+  {
+    name: 'the recommended remedy silently broadens to Full control',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      '`  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)(WO)"`,\n    `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)(WO)"`,',
+      '`  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,\n    `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)F"`,',
+    ]],
+  },
+  {
     name: 'the ACL advisory is delivered on every failure instead of once per agent',
     file: 'src/index.ts',
     arms: 'plugin.spec.mjs',

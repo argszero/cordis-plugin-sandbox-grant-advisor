@@ -87,10 +87,9 @@ test('the advisory names the right that is actually missing, and the wrong lever
   const text = advisoryText(failure)
   // The line the user is staring at, quoted verbatim.
   assert.match(text, /SetNamedSecurityInfoW failed \(Win32 5\): grantWrite\(D:\\ws\)/)
-  // The missing right, the remedy, and the mask that lacks it.
+  // The missing right and the mask that lacks it. The remedy lines themselves are
+  // pinned by the dedicated arm below, which asserts the form actually recommended.
   assert.match(text, /WRITE_OWNER/)
-  assert.match(text, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)F"/)
-  assert.match(text, /icacls "D:\\ws" \/grant "%USERNAME%:\(OI\)\(CI\)F"/)
   assert.match(text, /0x1301bf/)
   // The natural-but-wrong hypothesis is addressed rather than ignored.
   assert.match(text, /SeSecurityPrivilege is the wrong lever/)
@@ -99,6 +98,85 @@ test('the advisory names the right that is actually missing, and the wrong lever
   assert.match(text, new RegExp(PREREQUISITE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(text, new RegExp(ACL_DISCUSSIONS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(text, /neither edits ACLs nor elevates/)
+})
+
+test('the remedy is the right the prerequisite actually names, and the broad form is offered second', () => {
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  // The narrow grant: WRITE_OWNER alone, which is what the backend documents —
+  // it is the same right the diagnosis named, so the reader can see the one-liner
+  // and the explanation are about the same thing.
+  assert.match(text, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)\(WO\)"/)
+  assert.match(text, /icacls "D:\\ws" \/grant "%USERNAME%:\(OI\)\(CI\)\(WO\)"/)
+  assert.match(text, /exactly the right the prerequisite names/)
+  // ...and the inheritable form, so one command reaches existing subdirectories.
+  assert.match(text, /\(OI\)\(CI\) makes the ACE inheritable/)
+  // Full control still works, and saying so is not a second recipe but the same
+  // remedy with more than it needs — hence the derivation, not a second syntax pair.
+  assert.match(text, /Full control works just as well — the same line with `F` in place of `\(WO\)`/)
+  assert.match(text, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)F"/)
+  // The condition under which the one-liner is enough is stated, not assumed:
+  // owner-implicit rights cover the DACL half, and the caller owns the directory
+  // in every report this family has (#7750's own workspaces included).
+  assert.match(text, /Both assume you own the directory/)
+  assert.match(text, /owner-implicit rights cover the DACL half/)
+  assert.match(text, /A directory owned by someone else is a bigger change/)
+  // The order is the claim: the narrow form is the one being recommended.
+  assert.ok(
+    text.indexOf('(WO)') < text.indexOf('(OI)(CI)F'),
+    'the narrow grant must be offered before the broad one, not after it',
+  )
+})
+
+test('both environments that share this signature are named, because the text cannot tell them apart', () => {
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  // #7622 / #7646 / #7720: an inherited Modify-only entry.
+  assert.match(text, /Authenticated Users: Modify" \(`0x1301bf`\) from the drive root/)
+  // #7750 / #7735: a data volume where that inherited entry is all the caller has.
+  assert.match(text, /on a data\s+volume there may be no ACE naming you at all/)
+  assert.match(text, /that inherited entry is the whole of your access/)
+  // And why a refused label costs execution, not just a label: one merged call,
+  // atomically rejected, fail-closed.
+  assert.match(text, /halves go out as one call, so a refused label discards the write grant/)
+  assert.match(text, /refuses to start any command in the workspace instead of running it unconfined/)
+  // The discriminator covers both shapes — no ACE naming you is still this failure.
+  assert.match(text, /no entry names you at all and/)
+})
+
+test('the version boundary the error does not carry is stated, with the build and the flag', () => {
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  // Where the label arrives — the fact neither report could read off the error.
+  assert.match(text, /the label half is new to this package/)
+  assert.match(text, /Up to `0\.1\.6-alpha\.x` the backend touched the DACL only \(flag 4\)/)
+  assert.match(text, /`0\.1\.7-alpha\.1` is where the mandatory label/)
+  assert.match(text, /with it the SACL, flag 20/)
+  // It is a *discriminator*: the same string on an older line is another story.
+  assert.match(text, /belongs to a different cause space/)
+  assert.match(text, /on any\s+`0\.1\.7-\*` line it is this one/)
+  // And the reach it invites is refused with the reason: the label is the fix
+  // for out-of-workspace deletion, so downgrading trades one defect for another.
+  assert.match(text, /Rolling back is not the fix either/)
+  assert.match(text, /reverting it reintroduces the escape it closed/)
+})
+
+test('the version boundary is emitted in every class this module speaks in', () => {
+  // The boundary is a fact about the backend's flag, not about which of its calls
+  // failed, so withholding it in the other two classes would hide it exactly where
+  // a user is most likely to reach for an older build.
+  for (const message of [
+    REPORTED,
+    'SetNamedSecurityInfoW failed (Win32 1332): grantWrite(D:\\ws)',
+    'GetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)',
+  ]) {
+    const text = advisoryText(classifyProvisioningFailure(message))
+    assert.match(text, /0\.1\.7-alpha\.1/, `the boundary must be present for: ${message}`)
+    assert.match(text, /Rolling back is not the fix either/, `the boundary's second half must be present for: ${message}`)
+  }
 })
 
 test('an href replaces the thread line without dropping the fix', () => {
@@ -174,7 +252,10 @@ test('the denial says what happened, how bounded it is, and what to do', () => {
   assert.match(first, /already failed 2 times/)
   assert.match(first, /SetNamedSecurityInfoW failed \(Win32 5\): grantWrite\(D:\\ws\)/)
   assert.match(first, /automatic block 1 of 2/)
-  assert.match(first, /icacls "D:\\ws"/)
+  // The denial hands over the *same* remedy the advisory recommends, narrow form
+  // first: a model told to run a different command than the advisory printed is
+  // two answers to one question.
+  assert.match(first, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)\(WO\)"/)
   const last = denialText(failure, 3, 2, 2)
   assert.match(last, /automatic block 2 of 2/)
   assert.match(last, /the last one/, 'the model must know the budget is spent, not expect another block')

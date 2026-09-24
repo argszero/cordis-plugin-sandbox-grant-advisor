@@ -35,11 +35,14 @@ const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 /**
  * The prerelease lines this plugin claims to work on.
  *
- * `0.1.7-rc.1` is the version the third report ran; the others are the lines the
- * peer range admits. Adding a line here without running the suite on it is how a
- * wrong range gets published, so the list is the contract, not the manifest.
+ * The first five are the floors of the range's `||` segments; the last two are the
+ * builds the reports in this family ran on, kept so the range is checked against
+ * a real release of the line rather than only against its own boundary. Adding a
+ * line here without running the suite on it is how a wrong range gets published,
+ * so the list is the contract, not the manifest — every entry above was probed
+ * (`npm run test:probe-lines`) for the version that claims it.
  */
-const SUPPORTED_LINES = ['0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-alpha.1', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.7-rc.1']
+const SUPPORTED_LINES = ['0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-alpha.1', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.7-rc.1', '0.1.7-rc.2']
 
 /** Every file under `dir` whose name ends with one of `extensions`. */
 function walk(dir, extensions, found = []) {

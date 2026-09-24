@@ -30,6 +30,21 @@
  *   the advisory can quote the exact line the model and the user are looking
  *   at, and the path can be re-used in the fix command.
  *
+ * One signature covers two environments, and the text is identical in both, so
+ * the classifier cannot and must not try to tell them apart: a workspace the
+ * caller created with `mkdir` that inherits "Authenticated Users: Modify" from
+ * the drive root (`#7622`, `#7646`, `#7720`), and a directory on a data volume
+ * where **no ACE names the caller at all** so that the inherited entry is the
+ * whole of their access (`#7750` on D:/E:, `#7735`'s second defect). Both are
+ * the same gate — `WRITE_OWNER` on the directory — and the same one-line remedy
+ * satisfies both, which is why they share a class and the advisory names both
+ * shapes instead of guessing which one it is looking at. What the text *does*
+ * carry that the failure does not is the version boundary: the merged
+ * DACL + label write exists only from `0.1.7-alpha.1` on
+ * (`packages/sandbox/sandbox-windows-acl/src/acl.ts`, flag
+ * `DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION`), so on an older line
+ * the same string belongs to a different cause space.
+ *
  * ## The persistent-shell startup failure (`pty-startup`)
  *
  * `dsh-terminal-bash` throws `PTY shell exited during startup` when the shell
@@ -57,7 +72,13 @@
 
 /** Which provisioning operation failed, and which diagnosis follows from it. */
 export type FailureClass =
-  /** `SetNamedSecurityInfoW` returned `ERROR_ACCESS_DENIED` (5): the merged DACL + label write was refused. */
+  /**
+   * `SetNamedSecurityInfoW` returned `ERROR_ACCESS_DENIED` (5): the merged
+   * DACL + label write was refused. Both environments in the module doc land
+   * here — the `mkdir`-inherited Modify workspace and the data-volume directory
+   * with no ACE naming the caller — because the failure text cannot separate
+   * them and the remedy is the same `WRITE_OWNER` grant.
+   */
   | 'apply-denied'
   /** `SetNamedSecurityInfoW` failed with a Win32 code other than `ERROR_ACCESS_DENIED`. */
   | 'apply-other'

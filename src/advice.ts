@@ -13,6 +13,13 @@
  *   the caller can grant itself with `icacls`, unelevated. It is **not**
  *   `SeSecurityPrivilege`, the token privilege the reports naturally reach for;
  *   `whoami /priv` cannot show the difference, and elevation is the wrong lever.
+ *   The remedy is the **narrowest** form of that grant — `(WO)` alone, which is
+ *   literally the right the backend's prerequisite names — with Full control
+ *   offered as the broad alternative; and the advisory carries the **version
+ *   boundary** the label introduced (`0.1.7-alpha.1`), because that is what
+ *   separates "this is the label failure" from "this is something else", and
+ *   because rolling back is the reach it invites while making the very problem
+ *   it closed come back.
  * - **The persistent-shell failure** (`pty-startup`) is *not* fixable by the
  *   caller — least of all by the model, which has no shell to run anything in.
  *   So its advice says so and stops: the remedy is a user-side preset choice,
@@ -37,7 +44,7 @@ import { failureLine } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735'
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
@@ -114,7 +121,10 @@ function diagnosis(failure: ProvisioningFailure): string {
         'mandatory-integrity label go out as one `SetNamedSecurityInfoW`. The label lives in the SACL, and the',
         "owner's implicit rights cover only READ_CONTROL and WRITE_DAC, so the label half additionally needs",
         'WRITE_OWNER on the directory. A workspace created with `mkdir` normally inherits',
-        '"Authenticated Users: Modify" (`0x1301bf`) from the drive root — and that mask has neither right.',
+        '"Authenticated Users: Modify" (`0x1301bf`) from the drive root — and that mask has neither right; on a data',
+        'volume there may be no ACE naming you at all, so that inherited entry is the whole of your access. The two',
+        'halves go out as one call, so a refused label discards the write grant with it, and the sandbox then',
+        'refuses to start any command in the workspace instead of running it unconfined.',
         'This is a directory ACL fact, not a token privilege: `whoami /priv` will not show it, and',
         'SeSecurityPrivilege is the wrong lever here.',
       ].join('\n')
@@ -166,6 +176,29 @@ function nonFixes(failure: ProvisioningFailure, path: string): string[] {
 }
 
 /**
+ * When the label half arrived, and why an older build is not the remedy.
+ *
+ * Emitted for every class: the boundary is a fact about the package
+ * `sandbox-windows-acl` (whose `DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION`
+ * flag is what needs `WRITE_OWNER`), not about which of its two calls failed, so
+ * it is true wherever this module is willing to speak at all. It is also the one
+ * fact neither report could get from the error: the failure looks identical on a
+ * line where the label does not exist yet, and the build that introduced it is
+ * the natural thing to reach for and the wrong one to reach for.
+ * @returns the section's lines.
+ */
+function versionBoundary(): string {
+  return [
+    'A version boundary worth knowing before reaching for an older build: the label half is new to this package.',
+    'Up to `0.1.6-alpha.x` the backend touched the DACL only (flag 4), so a Modify-only workspace provisioned',
+    'fine; `0.1.7-alpha.1` is where the mandatory label — and with it the SACL, flag 20 — arrives. On a',
+    '`0.1.6-alpha.x`-or-older line this exact failure therefore belongs to a different cause space, while on any',
+    '`0.1.7-*` line it is this one. Rolling back is not the fix either: the label is what confines deletes to the',
+    'workspace, and reverting it reintroduces the escape it closed.',
+  ].join('\n')
+}
+
+/**
  * Build the advisory attached to the failing tool result.
  *
  * The family decides everything: one function so a caller does not have to
@@ -203,14 +236,25 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     '',
     diagnosis(failure),
     '',
+    versionBoundary(),
+    '',
     'Confirm the cause (unelevated) — `icacls` is a normal user command:',
     `  icacls "${path}"`,
-    'Look for an ACE that names YOUR OWN account (run `whoami` if unsure) with (F) / Full control.',
-    'If the strongest entry naming you is (M) / Modify, that is this failure.',
+    'Look for an ACE that names YOUR OWN account (run `whoami` if unsure) with (F) / Full control or',
+    '(WO) / Write owner. If the strongest entry naming you is (M) / Modify — or no entry names you at all and',
+    'your access comes from an inherited `Authenticated Users:(M)` — that is this failure.',
     '',
     'Fix it (unelevated, one line) and then run the command again:',
-    `  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,
-    `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)F"`,
+    `  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)(WO)"`,
+    `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)(WO)"`,
+    'WRITE_OWNER is exactly the right the prerequisite names, so this grants nothing the harness did not ask for,',
+    'and (OI)(CI) makes the ACE inheritable, so one command reaches the workspace\'s existing subdirectories.',
+    'Full control works just as well — the same line with `F` in place of `(WO)`:',
+    `  icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,
+    'Both assume you own the directory: owner-implicit rights cover the DACL half of the merged write, so',
+    'WRITE_OWNER is the single missing piece. A directory owned by someone else is a bigger change than a',
+    'one-liner — that is the harness\'s documented prerequisite, and it is why this failure is loud instead of',
+    'silently skipped.',
     '',
     ...nonFixes(failure, path),
     'How to read this: the harness documents the prerequisite (' + PREREQUISITE + ') and this',
@@ -302,7 +346,7 @@ export function denialText(
     '',
     'Retrying cannot succeed — the sandbox cannot start a command until the directory grant applies.',
     'Stop, and either apply the fix or hand the problem to the user:',
-    failure.path === undefined ? '' : `  icacls "${failure.path}" /grant "$env:USERNAME:(OI)(CI)F"`,
+    failure.path === undefined ? '' : `  icacls "${failure.path}" /grant "$env:USERNAME:(OI)(CI)(WO)"`,
     '',
     suffix > 0
       ? `This is automatic block ${String(denial)} of ${String(maxDenials)}; after that the call is allowed again.`

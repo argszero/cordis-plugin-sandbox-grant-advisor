@@ -30,10 +30,12 @@ stuck.
 
 ### 1. Workspace provisioning — the Windows ACL failure (`acl-provisioning`)
 
-Four reports describe this exact line: [discussion #7538], [discussion #7622],
-[discussion #7646], [discussion #7720]. In each one every sandboxed command fails
-the same way, before it runs, and the error names neither the missing right nor
-a remedy.
+Six reports describe this exact line: [discussion #7538], [discussion #7622],
+[discussion #7646], [discussion #7720], [discussion #7750], [discussion #7735]
+(the last two on data-volume workspaces, where *no* ACE names the caller at all —
+the inherited `Authenticated Users: Modify` is the whole of their access). In each
+one every sandboxed command fails the same way, before it runs, and the error names
+neither the missing right nor a remedy.
 
 `#7720` is worth reading for where the failure lands: the grant is materialized
 at sandbox **initialization**, so this is not one refused operation but *every*
@@ -66,7 +68,26 @@ Two consequences follow from that one line:
    is the token-privilege form of the same idea, and it is the hypothesis the
    reports naturally reach for — `whoami /priv` cannot tell the two apart,
    because `WRITE_OWNER` is an object right and never appears in that table.
-   Granting Full control to the workspace root needs **no** elevation.
+   Granting `WRITE_OWNER` on the workspace root needs **no** elevation. `#7735`
+   settles the gate with an isolation table on one machine and one unprivileged
+   account: the label write succeeds with Full control *or with Take-ownership
+   alone*, and fails with `ChangePermissions`, `ReadPermissions` or `Modify`
+   alone — so the gate is `WRITE_OWNER` and nothing else.
+3. **The remedy is the narrowest form of that right.** The advisory recommends
+   `icacls <dir> /grant "<user>:(OI)(CI)(WO)"` — `WO` *is* `WRITE_OWNER`, i.e.
+   literally the right the documented prerequisite names, so the one-liner grants
+   nothing the harness did not ask for — and offers Full control second, as the
+   same line with `F` in place of `(WO)`. Both assume the caller owns the
+   directory: owner-implicit rights cover the DACL half of the merged write.
+4. **The version boundary is stated, because the error cannot carry it.** Up to
+   `0.1.6-alpha.x` the backend's `SetNamedSecurityInfoW` wrote the DACL only
+   (flag 4) and a Modify-only workspace provisioned fine; the mandatory label —
+   and with it the SACL, flag 20 — arrives in `0.1.7-alpha.1`. So the same string
+   on an older line belongs to a different cause space, and the natural reach
+   (downgrade to the build that "worked") is refused with its reason: the label is
+   what confines deletes to the workspace, and reverting it reintroduces the
+   escape it closed. `#7750` asks for exactly this and explains why it is a
+   usability regression traded for a security fix.
 
 The grant is materialized lazily, on the first confined call, and **nothing is
 cached when it throws** — so the same failure repeats per command (850 calls
@@ -84,12 +105,17 @@ What was reported:
 Why it is refused while the directory looks writable: that call is a MERGED write ...
   ... the label half additionally needs WRITE_OWNER on the directory. ...
 
+A version boundary worth knowing before reaching for an older build: the label half is new to this package.
+Up to `0.1.6-alpha.x` the backend touched the DACL only (flag 4) ... `0.1.7-alpha.1` is where the mandatory
+label — and with it the SACL, flag 20 — arrives. ... Rolling back is not the fix either: the label is what
+confines deletes to the workspace, and reverting it reintroduces the escape it closed.
+
 Confirm the cause (unelevated) — `icacls` is a normal user command:
   icacls "D:\ws"
 
 Fix it (unelevated, one line) and then run the command again:
-  PowerShell: icacls "D:\ws" /grant "$env:USERNAME:(OI)(CI)F"
-  cmd:        icacls "D:\ws" /grant "%USERNAME%:(OI)(CI)F"
+  PowerShell: icacls "D:\ws" /grant "$env:USERNAME:(OI)(CI)(WO)"
+  cmd:        icacls "D:\ws" /grant "%USERNAME%:(OI)(CI)(WO)"
 
 What will NOT fix it — both look like the right move, and both were tried and reported:
   takeown /F "D:\ws" /R /D Y
@@ -295,6 +321,12 @@ than one that stays silent.
   replace it.** That guard keys on **call identity** (identical arguments
   retried); this one keys on the **environment signature**, which is how several
   *different* commands share one cause. Mounting both is sensible.
+- **The plugin cannot see the launcher half of `#7735`.** The Low label's other
+  side effect — the shell's publisher confirmation before launching a
+  Low-integrity `.bat`/`.cmd`/`.exe` — never appears in a tool result, so it is
+  outside the seam this plugin subscribes to. The report and its proposed fix
+  stay with the maintainers; all this plugin can do is explain the provisioning
+  failure that shares its root.
 - **The real fix is upstream, in both families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
@@ -325,11 +357,19 @@ composition that does not mount the service degrades to silence instead of
 failing to load. See `src/mode.ts`.
 
 Probed at the newest build of every line the range admits — `0.1.2-rc.1`,
-`0.1.3-alpha.2`, `0.1.5-rc.3`, `0.1.6-alpha.2`, `0.1.7-rc.1` (the build the third
-report ran) — with `npm run test:probe-lines`, which derives those builds from
-this range, installs each one from the registry into a scratch tree and runs the
-suite against it. A line whose probe fails is removed from the range rather than
-left claimed.
+`0.1.3-alpha.2`, `0.1.5-rc.3`, `0.1.6-alpha.2`, `0.1.7-rc.2` (the newest build of
+the line the later Windows reports ran on) — with `npm run test:probe-lines`,
+which derives those builds from this range, installs each one from the registry
+into a scratch tree and runs the suite against it. `0.1.7-rc.1`, the build the
+third report ran, is admitted by the same `||` segment and was probed while it was
+the newest of that line.
+
+The whole set is re-probed whenever this package's source changes rather than
+carried over from an earlier version: the range is a claim about *this* build of
+the plugin, so `0.4.0` re-ran all five lines above. A line whose probe fails is
+removed from the range rather than left claimed. The scratch tree's resolved
+versions are the ones to read back when a probe is quoted as evidence — the probe
+script pins them by exact version, and `--keep` leaves the tree in place to check.
 
 ## Development
 
@@ -357,4 +397,6 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7622]: https://github.com/deepseek-ai/deepseek-harness/discussions/7622
 [discussion #7646]: https://github.com/deepseek-ai/deepseek-harness/discussions/7646
 [discussion #7720]: https://github.com/deepseek-ai/deepseek-harness/discussions/7720
+[discussion #7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
+[discussion #7735]: https://github.com/deepseek-ai/deepseek-harness/discussions/7735
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638

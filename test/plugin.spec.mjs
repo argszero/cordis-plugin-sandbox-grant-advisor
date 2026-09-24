@@ -53,7 +53,11 @@ test('the reported failure is settled with the diagnosis beside it', async () =>
   const body = notice.content.map(block => block.text).join('\n')
   assert.match(body, /WRITE_OWNER/)
   assert.match(body, /SetNamedSecurityInfoW failed \(Win32 5\): grantWrite\(D:\\ws\)/)
-  assert.match(body, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)F"/)
+  // The remedy the advisory recommends, and the boundary it adds that the error
+  // cannot carry — both delivered through the real ToolRuntime, not just in the
+  // pure-text arm.
+  assert.match(body, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)\(WO\)"/)
+  assert.match(body, /0\.1\.7-alpha\.1/)
   // A host-side account exists too, so the transcript is not the only record.
   assert.equal(
     logText(logged).split('\n').filter(line => line.includes('sandbox-grant-advisor: workspace ACL provisioning failed')).length,
