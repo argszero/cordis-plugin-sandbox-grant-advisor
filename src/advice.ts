@@ -20,6 +20,24 @@
  *   separates "this is the label failure" from "this is something else", and
  *   because rolling back is the reach it invites while making the very problem
  *   it closed come back.
+ *
+ *   **The remedy is forked on ownership, because one command cannot serve both
+ *   environments.** The reports split into two rights situations behind an
+ *   identical error: a workspace **the caller owns** (`#7622`, `#7646`, `#7720`,
+ *   `#7750`, `#7804`), where the owner's implicit `WRITE_DAC` satisfies the DACL
+ *   half and `(WO)` is the whole of what is missing — so the `icacls /grant`
+ *   that supplies it *can itself run*, unelevated; and a directory **the caller
+ *   does not own** (`#7771`: owner `BUILTIN\Administrators`, held deny-only for
+ *   their token), where `WRITE_DAC` is missing too, so `icacls /grant` is denied
+ *   for the very command that would fix it, and `(WO)` alone would not be enough
+ *   even if it went through. The classifier cannot tell these apart — the text is
+ *   identical — so the advisory does what it can do instead of guessing: it hands
+ *   over the **ownership check** (`(Get-Acl "<dir>").Owner`) as the branch
+ *   selector, then gives each branch the command that actually works there, and
+ *   says why the other branch's command is not a fallback. A single unconditional
+ *   one-liner would send the second environment to a command that is refused
+ *   before it runs — the same defect this module exists to answer, a remedy that
+ *   does not work delivered confidently.
  * - **The persistent-shell failure** (`pty-startup`) is *not* fixable by the
  *   caller — least of all by the model, which has no shell to run anything in.
  *   So its advice says so and stops: the remedy is a user-side preset choice,
@@ -44,7 +62,7 @@ import { failureLine } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816'
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
@@ -138,7 +156,7 @@ function diagnosis(failure: ProvisioningFailure): string {
       return [
         'Why it is refused: this is the same merged write, but the Win32 code is not ERROR_ACCESS_DENIED (5), so',
         'the missing-rights story above does not apply verbatim — a missing path, a non-directory target, or a',
-        'filesystem that does not carry ACLs are all possibilities. The one-line fix below is safe to try; if the',
+        'filesystem that does not carry ACLs are all possibilities. The commands below are safe to try; if the',
         'code persists, it is a different failure and worth reporting with the code.',
       ].join('\n')
   }
@@ -157,7 +175,11 @@ function diagnosis(failure: ProvisioningFailure): string {
  *   diagnosis.
  *
  * A negative claim still has to be earned: the failure to avoid is advice that
- * is confidently wrong in the other direction.
+ * is confidently wrong in the other direction. That is why the `takeown` line
+ * claims only what is true in **both** ownership branches: it supplies the DACL
+ * half and never `WRITE_OWNER`, so it is not the fix by itself — while still
+ * being a legitimate first step (with elevation) where the caller is not the
+ * owner. Calling it useless outright would have been the mirror-image error.
  * @param failure - the recognized provisioning failure.
  * @param path - the directory the error named, or the placeholder.
  * @returns the section's lines, or an empty array for a class it does not fit.
@@ -165,10 +187,11 @@ function diagnosis(failure: ProvisioningFailure): string {
 function nonFixes(failure: ProvisioningFailure, path: string): string[] {
   if (failure.klass !== 'apply-denied') return []
   return [
-    'What will NOT fix it — both look like the right move, and both were tried and reported:',
+    'What will NOT fix it on its own — both look like the right move, and both were tried and reported:',
     `  takeown /F "${path}" /R /D Y`,
-    "    makes you the owner, but ownership's implicit rights are READ_CONTROL and WRITE_DAC only.",
-    '    The owner does not implicitly hold WRITE_OWNER, which is the right this call needs.',
+    "    makes you the owner, and ownership's implicit rights are READ_CONTROL and WRITE_DAC only — so it",
+    '    supplies the DACL half and still not WRITE_OWNER, the right this call needs. In the second branch above',
+    '    it is a legitimate first step with elevation; it is never the fix by itself.',
     `  icacls "${path}" /reset /T /C`,
     '    restores inheritance, and inheritance is what supplied the Modify-only ACE above.',
     '',
@@ -244,17 +267,36 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     '(WO) / Write owner. If the strongest entry naming you is (M) / Modify — or no entry names you at all and',
     'your access comes from an inherited `Authenticated Users:(M)` — that is this failure.',
     '',
-    'Fix it (unelevated, one line) and then run the command again:',
+    'Ownership decides which of the two commands below can work, so read it first — PowerShell 5.1 or later:',
+    `  (Get-Acl "${path}").Owner      # compare with: whoami`,
+    'If that is not your own account, take the second branch: the first one is refused before it runs.',
+    '',
+    'IF YOU OWN THE DIRECTORY — the usual workspace, whether on the system drive or a data volume:',
+    '  one unelevated line, then run the command again:',
     `  PowerShell: icacls "${path}" /grant "$env:USERNAME:(OI)(CI)(WO)"`,
     `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)(WO)"`,
     'WRITE_OWNER is exactly the right the prerequisite names, so this grants nothing the harness did not ask for,',
     'and (OI)(CI) makes the ACE inheritable, so one command reaches the workspace\'s existing subdirectories.',
     'Full control works just as well — the same line with `F` in place of `(WO)`:',
     `  icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,
-    'Both assume you own the directory: owner-implicit rights cover the DACL half of the merged write, so',
-    'WRITE_OWNER is the single missing piece. A directory owned by someone else is a bigger change than a',
-    'one-liner — that is the harness\'s documented prerequisite, and it is why this failure is loud instead of',
-    'silently skipped.',
+    'Why `(WO)` is the whole of what is missing there: an owner holds READ_CONTROL and WRITE_DAC implicitly,',
+    'and WRITE_DAC is what `icacls /grant` itself needs — so the DACL half of the merged write already has what',
+    'it wants, and WRITE_OWNER is the single missing piece.',
+    '',
+    'IF YOU DO NOT OWN IT — a directory an installer or another account created, e.g. owner',
+    '`BUILTIN\\Administrators`:',
+    '  the line above cannot run at all. Changing a DACL takes WRITE_DAC, which you hold neither as owner nor',
+    '  through any ACE, so `icacls /grant` is refused with `Access is denied` — for the very command that would',
+    '  fix it. The merged write wants WRITE_DAC and WRITE_OWNER together, so `(WO)` alone would not be enough',
+    '  here even if it went through. Run the grant once from an account that already holds both — that is, from an',
+    '  ELEVATED prompt:',
+    `  icacls "${path}" /grant "<your-account>:(OI)(CI)F"`,
+    'Full control is used because it is the rights set covering both halves; the other reach both reports name is',
+    'to take ownership first, which also needs elevation (it wants SeTakeOwnership), after which the unelevated',
+    '`(WO)` line above applies:',
+    `  icacls "${path}" /setowner "<your-account>"`,
+    'Or sidestep the ACL entirely: create the workspace under `%USERPROFILE%` — a directory created there',
+    'inherits Full control for you — and open the session on that one.',
     '',
     ...nonFixes(failure, path),
     'How to read this: the harness documents the prerequisite (' + PREREQUISITE + ') and this',

@@ -67,7 +67,31 @@ const MUTATIONS = [
     name: 'the non-fix section presents itself as the remedy instead of the thing that does not work',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["'What will NOT fix it — both look like the right move, and both were tried and reported:',", "'If that fails, try one of these instead:',"]],
+    edits: [["'What will NOT fix it on its own — both look like the right move, and both were tried and reported:',", "'If that fails, try one of these instead:',"]],
+  },
+  {
+    name: 'the remedy stops forking — the not-owner environment is sent the unelevated one-liner that is refused there',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['`  icacls "${path}" /grant "<your-account>:(OI)(CI)F"`,', '`  icacls "${path}" /grant "$env:USERNAME:(OI)(CI)(WO)"`,']],
+  },
+  {
+    name: 'the ownership check is dropped, leaving the reader two commands and no way to choose',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['`  (Get-Acl "${path}").Owner      # compare with: whoami`,', "'  (see the branches below)',"]],
+  },
+  {
+    name: 'the elevation the not-owner branch needs is dropped from the instruction',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '  ELEVATED prompt:',", "    '  prompt:',"]],
+  },
+  {
+    name: 'the not-owner branch loses why the narrow grant cannot be enough there',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '  fix it. The merged write wants WRITE_DAC and WRITE_OWNER together, so `(WO)` alone would not be enough',\n    '  here even if it went through. Run the grant once from an account that already holds both — that is, from an',", "    '  fix it. Run the grant once from an account that already holds both — that is, from an',"]],
   },
   {
     name: 'the version boundary is withheld from the classes that do not see ERROR_ACCESS_DENIED',

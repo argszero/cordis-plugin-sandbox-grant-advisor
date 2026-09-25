@@ -118,10 +118,10 @@ test('the remedy is the right the prerequisite actually names, and the broad for
   assert.match(text, /icacls "D:\\ws" \/grant "\$env:USERNAME:\(OI\)\(CI\)F"/)
   // The condition under which the one-liner is enough is stated, not assumed:
   // owner-implicit rights cover the DACL half, and the caller owns the directory
-  // in every report this family has (#7750's own workspaces included).
-  assert.match(text, /Both assume you own the directory/)
-  assert.match(text, /owner-implicit rights cover the DACL half/)
-  assert.match(text, /A directory owned by someone else is a bigger change/)
+  // in the environments this branch describes. Where the caller does not own it,
+  // the advisory branches instead of pretending the condition holds.
+  assert.match(text, /an owner holds READ_CONTROL and WRITE_DAC implicitly/)
+  assert.match(text, /WRITE_OWNER is the single missing piece/)
   // The order is the claim: the narrow form is the one being recommended.
   assert.ok(
     text.indexOf('(WO)') < text.indexOf('(OI)(CI)F'),
@@ -197,10 +197,51 @@ test('the two remedies that look right and are not are named, with the reason ea
   // The reasons are different, and each is the fact that makes the command fail:
   // the owner's implicit rights, and what `/reset` puts back.
   assert.match(text, /ownership's implicit rights are READ_CONTROL and WRITE_DAC only/)
-  assert.match(text, /The owner does not implicitly hold WRITE_OWNER/)
+  assert.match(text, /still not WRITE_OWNER, the right this call needs/)
   assert.match(text, /restores inheritance, and inheritance is what supplied the Modify-only ACE/)
-  // Both are still promised as *not* the fix, never as the remedy.
-  assert.match(text, /What will NOT fix it/)
+  // Both are still promised as *not* the fix, never as the remedy. `takeown` is
+  // claimed to fail only as a complete fix — it is a real first step with
+  // elevation where the caller is not the owner, and denying that would be the
+  // mirror-image error.
+  assert.match(text, /What will NOT fix it on its own/)
+  assert.match(text, /it is never the fix by itself/)
+})
+
+test('the remedy forks on ownership, because one command cannot serve both environments', () => {
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  // The branch selector is a check the user runs, not a guess: the text is
+  // identical in both environments, so the advisory cannot pick a branch for
+  // them — it hands over the ownership read instead.
+  assert.match(text, /Ownership decides which of the two commands below can work/)
+  assert.match(text, /\(Get-Acl "D:\\ws"\)\.Owner/)
+  assert.match(text, /compare with: whoami/)
+  assert.match(text, /the first one is refused before it runs/)
+  // Branch one: the caller owns it, and the narrow grant runs unelevated.
+  assert.match(text, /IF YOU OWN THE DIRECTORY/)
+  assert.match(text, /an owner holds READ_CONTROL and WRITE_DAC implicitly/)
+  assert.match(text, /WRITE_DAC is what `icacls \/grant` itself needs/)
+  // Branch two: an owner that is not the caller — `#7771`'s shape.
+  assert.match(text, /IF YOU DO NOT OWN IT/)
+  assert.match(text, /`BUILTIN\\Administrators`/)
+  assert.match(text, /Changing a DACL takes WRITE_DAC/)
+  assert.match(text, /`icacls \/grant` is refused with `Access is denied` — for the very command that would/)
+  assert.match(text, /so `\(WO\)` alone would not be enough/)
+  // ...and the path out of it: elevation, the two reaches the reports name, and
+  // the sidestep that needs no ACL edit at all.
+  assert.match(text, /ELEVATED prompt/)
+  assert.match(text, /icacls "D:\\ws" \/grant "<your-account>:\(OI\)\(CI\)F"/)
+  assert.match(text, /icacls "D:\\ws" \/setowner "<your-account>"/)
+  assert.match(text, /it wants SeTakeOwnership/)
+  assert.match(text, /after which the unelevated/)
+  assert.match(text, /create the workspace under `%USERPROFILE%`/)
+  // The fork is a fork: the owner branch is offered as branch one, so the narrow
+  // unelevated line still comes before any elevated command.
+  assert.ok(
+    text.indexOf('IF YOU OWN THE DIRECTORY') < text.indexOf('IF YOU DO NOT OWN IT'),
+    'the owner branch must come first — it is the environment the reports describe most often',
+  )
 })
 
 test('the non-fix section is emitted only where its claim is true', () => {

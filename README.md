@@ -113,17 +113,55 @@ confines deletes to the workspace, and reverting it reintroduces the escape it c
 Confirm the cause (unelevated) — `icacls` is a normal user command:
   icacls "D:\ws"
 
-Fix it (unelevated, one line) and then run the command again:
+Ownership decides which of the two commands below can work, so read it first — PowerShell 5.1 or later:
+  (Get-Acl "D:\ws").Owner      # compare with: whoami
+
+IF YOU OWN THE DIRECTORY — the usual workspace, on a data volume as much as on C::
+  one unelevated line, then run the command again:
   PowerShell: icacls "D:\ws" /grant "$env:USERNAME:(OI)(CI)(WO)"
   cmd:        icacls "D:\ws" /grant "%USERNAME%:(OI)(CI)(WO)"
+  ... Full control works just as well — the same line with `F` in place of `(WO)`
 
-What will NOT fix it — both look like the right move, and both were tried and reported:
+IF YOU DO NOT OWN IT — a directory an installer or another account created, e.g. owner
+`BUILTIN\Administrators`:
+  the line above cannot run at all. Changing a DACL takes WRITE_DAC, which you hold neither as owner nor
+  through any ACE, so `icacls /grant` is refused with `Access is denied` — for the very command that would
+  fix it. ... Run the grant once from an account that already holds both — that is, from an ELEVATED prompt:
+  icacls "D:\ws" /grant "<your-account>:(OI)(CI)F"
+  ... or take ownership first (also elevated; it wants SeTakeOwnership), after which the unelevated `(WO)`
+  line above applies: icacls "D:\ws" /setowner "<your-account>"
+  ... or sidestep the ACL: create the workspace under `%USERPROFILE%`.
+
+What will NOT fix it on its own — both look like the right move, and both were tried and reported:
   takeown /F "D:\ws" /R /D Y
-    makes you the owner, but ownership's implicit rights are READ_CONTROL and WRITE_DAC only.
-    The owner does not implicitly hold WRITE_OWNER, which is the right this call needs.
+    makes you the owner, and ownership's implicit rights are READ_CONTROL and WRITE_DAC only — so it
+    supplies the DACL half and still not WRITE_OWNER, the right this call needs.
   icacls "D:\ws" /reset /T /C
     restores inheritance, and inheritance is what supplied the Modify-only ACE above.
 ```
+
+**Why the remedy forks** (added in 0.5.0). The same error covers two different
+rights situations, and one command cannot serve both. Where the caller **owns**
+the directory, the owner's implicit `WRITE_DAC` satisfies the DACL half of the
+merged write, `WRITE_OWNER` is the single missing right, and the unelevated
+`icacls /grant` that supplies it can itself run — [#7750] measured exactly that
+fix working. Where the caller **does not own** it ([#7771]: owner
+`BUILTIN\Administrators`, held deny-only for that token), `WRITE_DAC` is missing
+too, so the very same command is refused before it does anything, and `(WO)`
+alone would not be enough even if it went through. The failure text is identical
+in both, so the classifier cannot pick a branch — the advisory hands over the
+**ownership check** as the selector instead of guessing, which is also the
+actionable-guidance half of what [#7771] asked for. Until 0.5.0 a single
+unconditional one-liner was printed, with a sentence noting it assumed
+ownership; that would have sent the second environment to a command that is
+denied — the same defect this plugin exists to answer.
+
+**What is deliberately *not* shipped**: `icacls ... /grant "<user>:(OI)(CI)(WD,WO)"`,
+the two needed rights named explicitly. It is the tighter form and it is
+plausibly correct syntax, but this project has no Windows host to run it on, and
+shipping an unverified command in a remedy whose whole point is that it works is
+the failure mode being fixed. `F` (verified by [#7804]'s reporter) and
+`/setowner` (named by both reports) are given instead.
 
 ### 2. Persistent shell startup (`pty-startup`)
 
@@ -399,4 +437,10 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7720]: https://github.com/deepseek-ai/deepseek-harness/discussions/7720
 [discussion #7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
 [discussion #7735]: https://github.com/deepseek-ai/deepseek-harness/discussions/7735
+[discussion #7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
+[discussion #7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
+[discussion #7816]: https://github.com/deepseek-ai/deepseek-harness/discussions/7816
+[#7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
+[#7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
+[#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638

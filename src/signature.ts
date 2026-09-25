@@ -30,17 +30,32 @@
  *   the advisory can quote the exact line the model and the user are looking
  *   at, and the path can be re-used in the fix command.
  *
- * One signature covers two environments, and the text is identical in both, so
- * the classifier cannot and must not try to tell them apart: a workspace the
- * caller created with `mkdir` that inherits "Authenticated Users: Modify" from
- * the drive root (`#7622`, `#7646`, `#7720`), and a directory on a data volume
- * where **no ACE names the caller at all** so that the inherited entry is the
- * whole of their access (`#7750` on D:/E:, `#7735`'s second defect). Both are
- * the same gate — `WRITE_OWNER` on the directory — and the same one-line remedy
- * satisfies both, which is why they share a class and the advisory names both
- * shapes instead of guessing which one it is looking at. What the text *does*
- * carry that the failure does not is the version boundary: the merged
- * DACL + label write exists only from `0.1.7-alpha.1` on
+ * One signature covers three environments, the text is identical in all of them,
+ * and the classifier cannot and must not try to tell them apart — but the
+ * *remedy* is not the same in all of them, which is why the advisory forks on a
+ * check the user runs rather than on a guess this module cannot make:
+ *
+ * - a workspace the caller created with `mkdir` that inherits "Authenticated
+ *   Users: Modify" from the drive root (`#7622`, `#7646`, `#7720`);
+ * - a directory on a data volume where **no ACE names the caller at all**, so
+ *   the inherited entry is the whole of their access (`#7750` on D:/E:,
+ *   `#7735`'s second defect);
+ * - a directory **the caller does not own** — an installer- or
+ *   administrator-created one, `#7771` (owner `BUILTIN\Administrators`, held
+ *   deny-only for that token), which `#7804` reached from the other direction.
+ *
+ * In the first two the caller is the owner, so their implicit `WRITE_DAC`
+ * satisfies the DACL half and `WRITE_OWNER` is the single missing right — one
+ * unelevated `icacls /grant` supplies exactly it, and `#7750` measured that
+ * remedy working. In the third `WRITE_DAC` is missing as well, so that same
+ * `icacls` is refused for the very command that would fix it and `(WO)` alone
+ * would not be enough even if it went through. The advisory therefore hands over
+ * the ownership check (`(Get-Acl "<dir>").Owner`) as the branch selector and
+ * gives each branch the command that works there — the same class, two rights
+ * situations, and no guess about which one this is.
+ *
+ * What the text *does* carry that the failure does not is the version boundary:
+ * the merged DACL + label write exists only from `0.1.7-alpha.1` on
  * (`packages/sandbox/sandbox-windows-acl/src/acl.ts`, flag
  * `DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION`), so on an older line
  * the same string belongs to a different cause space.
@@ -74,10 +89,14 @@
 export type FailureClass =
   /**
    * `SetNamedSecurityInfoW` returned `ERROR_ACCESS_DENIED` (5): the merged
-   * DACL + label write was refused. Both environments in the module doc land
-   * here — the `mkdir`-inherited Modify workspace and the data-volume directory
-   * with no ACE naming the caller — because the failure text cannot separate
-   * them and the remedy is the same `WRITE_OWNER` grant.
+   * DACL + label write was refused. All three environments in the module doc
+   * land here — the `mkdir`-inherited Modify workspace, the data-volume
+   * directory with no ACE naming the caller, and the directory owned by another
+   * account — because the failure text cannot separate them. The first two are
+   * the same rights situation (the caller owns it; `WRITE_OWNER` is the whole of
+   * what is missing) and share the unelevated remedy; the third is missing
+   * `WRITE_DAC` as well, which is why the advisory hands over the ownership
+   * check and forks the command on it.
    */
   | 'apply-denied'
   /** `SetNamedSecurityInfoW` failed with a Win32 code other than `ERROR_ACCESS_DENIED`. */
