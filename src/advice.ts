@@ -3,8 +3,9 @@
  * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test, one family at a time. The two families are shaped by the same two
- * questions, and they answer them differently:
+ * by a test, one family at a time. The three families are shaped by the same
+ * question — is this the sandbox's doing, and what can the reader do about it —
+ * and they answer it differently:
  *
  * - **The ACL failure** (`acl-provisioning`) *is* fixable by the caller, so its
  *   advice names the right the caller is missing and gives the command.
@@ -45,6 +46,19 @@
  *   Handing the model a command here would be advice to run something that
  *   cannot run, and naming a one-shot shell tool would be advice to call a tool
  *   the failing composition does not mount.
+ * - **The native-init death** (`native-init`) is the one whose remedy is **split**:
+ *   the *class* is not the model's to fix, but one of its two measured producers
+ *   is. A confined child that died with `STATUS_DLL_INIT_FAILED` never ran
+ *   anything, so retrying the same call is pure waste — but if the program that
+ *   could not start was an MSYS2/Git-Bash one, the same work expressed with
+ *   PowerShell or `cmd` runs fine under the identical mode, and the model *can*
+ *   make that change because the model is the one that wrote the command. So the
+ *   advice carries a stop instruction, the one in-session conversion, and the
+ *   user-side remedy for the other producer. What it deliberately does **not** do
+ *   is guess which producer this is: the code alone cannot say, and the two
+ *   checks it hands over are facts the reader holds (what program they ran;
+ *   whether this is the packaged desktop app, which the plugin reports rather
+ *   than assumes).
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -52,13 +66,17 @@
  * SID and grants `(F)` — which separates "Modify-only directory" from "the
  * documented prerequisite is wrong", the open question upstream. For the PTY
  * family it is the **effective sandbox mode**, which is why that advisory is
- * only ever built with the mode the call actually ran under.
+ * only ever built with the mode the call actually ran under. For the native-init
+ * family it is two checks the reader performs — which program could not start,
+ * and whether this host is the packaged desktop app — because the code alone
+ * cannot separate the producers and a guess would send half its readers to the
+ * wrong remedy.
  *
  * @module
  */
 
-import type { ProvisioningFailure, PtyStartupFailure, RecognizedFailure } from './signature.js'
-import { failureLine } from './signature.js'
+import type { ProvisioningFailure, PtyStartupFailure, NativeInitFailure, RecognizedFailure } from './signature.js'
+import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
@@ -66,6 +84,9 @@ export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / 
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
+
+/** The upstream threads the native-init-death advisory is a stopgap for. */
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877'
 
 /** The documented prerequisite, quoted from the backend's README. */
 export const PREREQUISITE = 'granted directories must be caller-owned and grant `WRITE_OWNER`'
@@ -120,10 +141,32 @@ export interface AdvisoryContext {
   readonly tool?: string
   /**
    * The sandbox mode the failing call ran under. Required by the
-   * `pty-startup` family — the whole diagnosis is the mode — and unused by the
-   * ACL family.
+   * `pty-startup` family — the whole diagnosis is the mode — and by the
+   * `native-init` family, whose gate is the same question; unused by the ACL
+   * family.
    */
   readonly mode?: SandboxModeName
+  /**
+   * Whether this process is an Electron binary (`process.versions.electron`).
+   * Used by the `native-init` family to report — not to assume — which of its
+   * producers this host can have; absent means "ask the live process", so a
+   * caller cannot accidentally state a fact it did not measure.
+   */
+  readonly electronHost?: boolean
+}
+
+/**
+ * Whether this process is running on an Electron binary.
+ *
+ * In the packaged desktop the harness host *is* Electron, started with
+ * `ELECTRON_RUN_AS_NODE=1` so it behaves as Node — which is why the variable is
+ * defined here and why its presence is the discriminator the `#7876` producer
+ * turns on: `sandbox-local` launches the sandbox runner as `process.execPath`,
+ * and in that build the exec path is the Electron executable.
+ * @returns true when `process.versions.electron` is set.
+ */
+function electronHost(): boolean {
+  return process.versions.electron !== undefined
 }
 
 /**
@@ -226,11 +269,11 @@ function versionBoundary(): string {
  *
  * The family decides everything: one function so a caller does not have to
  * remember which family needs which fact, and so the mode requirement of the
- * PTY family is enforced by construction rather than by convention.
+ * two gated families is enforced by construction rather than by convention.
  * @param failure - the recognized failure.
  * @param context - what the caller knows about the failing call.
  * @returns the user-role notice text, with any remedy ready to paste.
- * @throws when a PTY failure is advised without its resolved sandbox mode.
+ * @throws when a mode-gated failure is advised without its resolved sandbox mode.
  */
 export function advisoryText(failure: RecognizedFailure, context: AdvisoryContext = {}): string {
   if (failure.family === 'pty-startup') {
@@ -238,6 +281,12 @@ export function advisoryText(failure: RecognizedFailure, context: AdvisoryContex
       throw new Error('sandbox-grant-advisor: the persistent-shell advisory requires the resolved sandbox mode')
     }
     return ptyAdvisory(failure, context.mode, context.tool, context.href)
+  }
+  if (failure.family === 'native-init') {
+    if (context.mode === undefined) {
+      throw new Error('sandbox-grant-advisor: the native-init advisory requires the resolved sandbox mode')
+    }
+    return nativeInitAdvisory(failure, context.mode, context.electronHost ?? electronHost(), context.href)
   }
   return aclAdvisory(failure, context.href)
 }
@@ -307,6 +356,84 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
 }
 
 /**
+ * Build the advisory for a confined Windows child that never reached its entry
+ * point.
+ *
+ * Three things this text must not do: retry silently (the identical call cannot
+ * start), hand the model a command to run (there may be no working shell to run
+ * it in — that is what died), or assert which producer this is. The code is a
+ * loader status and says nothing about the sandbox by itself, so the diagnosis
+ * is the *class* ("the process never started") plus the two producers that have
+ * been measured under this harness, each with the check that distinguishes it.
+ * One of those checks the plugin answers itself and reports as a fact — whether
+ * this process is an Electron binary — rather than assuming, because a reader
+ * told "this is the packaged desktop" without evidence would be reading a guess
+ * dressed as a finding.
+ * @param failure - the recognized failure.
+ * @param mode - the resolved sandbox mode the failing call ran under.
+ * @param onElectron - whether this process is an Electron binary.
+ * @param href - optional URL shown for the upstream threads.
+ * @returns the user-role notice text.
+ */
+function nativeInitAdvisory(
+  failure: NativeInitFailure,
+  mode: SandboxModeName,
+  onElectron: boolean,
+  href?: string,
+): string {
+  const where = href === undefined ? `tracked upstream (discussions ${NATIVE_INIT_DISCUSSIONS})` : `tracked upstream: ${href}`
+  return [
+    'Sandboxed command never started — the process died while its native libraries were loading.',
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}        (0xC0000142 STATUS_DLL_INIT_FAILED)`,
+    `The call ran under sandbox mode \`${mode}\`, where the harness starts every command through its`,
+    'restricted-token runner.',
+    '',
+    `0x${failure.exitCode.toString(16).toUpperCase()} is STATUS_DLL_INIT_FAILED: the Windows loader terminated the process while it was`,
+    'initializing its DLLs and C runtime, which is BEFORE the program\'s entry point. A command that ran and',
+    'then failed exits with its own status and prints its own output; this one produced neither. The number',
+    'is also not a portable exit status — those are 0-255, and this is a 32-bit NTSTATUS. Nothing in the code',
+    'says "sandbox" by itself; what makes the sandbox a candidate is the mode above, under which every',
+    'command is spawned through the ACL runner.',
+    '',
+    'Two producers have been measured under a confining Windows mode. Check which one this is:',
+    '  1. An MSYS2 / Git-Bash program — `bash.exe`, `sh.exe`, or anything from a Git for Windows or MSYS2',
+    '     distribution. Under the restricted token its runtime cannot create the pipe it uses for signals,',
+    '     and it aborts in the loader phase (`couldn\'t create signal pipe, Win32 error 5`), while `cmd.exe`',
+    '     and PowerShell run fine in the same workspace under the same mode (#7877).',
+    '     If that is what could not start: write the same work as a PowerShell or `cmd` command instead and',
+    '     continue — do not retry the MSYS2 program.',
+    '  2. The packaged desktop application\'s sandbox runner. `dsh-sandbox-local` starts the runner as',
+    '     `[process.execPath, runner.js]`, and in the packaged build `process.execPath` is the Electron',
+    '     executable, which starts as an *application* unless the child\'s environment carries',
+    '     `ELECTRON_RUN_AS_NODE=1` — so the runner never runs and every confined command reports this code',
+    '     with no output at all (#7876).',
+    onElectron
+      ? '     This process IS an Electron binary (`process.versions.electron` is set), so that producer applies here:'
+      : '     This process is NOT an Electron binary (`process.versions.electron` is unset), so the runner is a real',
+    onElectron
+      ? '     run the same command with `danger-full-access`, or from an unpacked `node apps/cli/lib/bin.js web`'
+      : '     Node binary here and that producer cannot be the cause. If the program was not an MSYS2 one either,',
+    onElectron
+      ? '     host where the runner is a real Node binary. If it works there, the runner never ran and this is the cause.'
+      : '     this failure is outside both measured producers: stop and hand it to the user.',
+    '',
+    'Do not retry this call: the environment has not changed, and the identical call produces the identical',
+    'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
+    '',
+    'Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of',
+    'its own DLLs dies this way too, and the sandbox backend\'s own source records that a child started with',
+    'a hidden console window does as well (which is why that backend avoids `CREATE_NO_WINDOW`). This is not',
+    'a claim that the sandbox caused the failure — the code cannot say that. What is claimed is narrower and',
+    'checkable: the process never reached its entry point, and under this mode these two producers are known.',
+    '',
+    'This is a stopgap, ' + where + '. What it is NOT: this plugin neither changes an environment nor',
+    'widens the sandbox — the checks above are yours to make, and `danger-full-access` is not offered as a fix.',
+  ].join('\n')
+}
+
+/**
  * Build the advisory for a persistent-shell startup failure.
  *
  * The one thing this text must never do is hand the model a command to run:
@@ -360,14 +487,18 @@ function ptyAdvisory(failure: PtyStartupFailure, mode: SandboxModeName, tool?: s
  * Build the pre-dispatch denial for the optional fail-fast half.
  *
  * The blocking half is deliberately **ACL-only**, and this function's parameter
- * type is where that is enforced. The PTY family gets an advisory and nothing
- * else, for a reason that is about the remedy rather than about the failure:
+ * type is where that is enforced. The two mode-gated families get an advisory
+ * and nothing else, for a reason that is about the remedy rather than about the
+ * failure:
  * the ACL remedy is a command the user can run *while the session continues*,
  * so refusing further identical calls cannot make the session unfinishable —
  * spending the budget always lets the call through, and a repaired environment
  * is discovered by exactly that. The PTY remedy is a preset swap, which happens
- * between sessions; refusing calls could only pad a session that is already
- * unable to do the thing being refused.
+ * between sessions, and the native-init remedy is a launch fix on the user's
+ * side (the one in-session part — rewriting an MSYS2 command — the model does by
+ * calling a different tool invocation, which has a different call key and is
+ * therefore never the call being refused); refusing calls could only pad a
+ * session that is already unable to do the thing being refused.
  * @param failure - the recognized failure.
  * @param observed - how many provisioning failures this agent has produced.
  * @param denial - this denial's 1-based ordinal.

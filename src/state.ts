@@ -8,10 +8,11 @@
  *
  * ## One record per family
  *
- * This plugin now recognizes two unrelated environment failures — a workspace
- * that cannot be provisioned (`acl-provisioning`) and a persistent shell that
- * cannot start (`pty-startup`). They are different diagnoses with different
- * remedies, so their bookkeeping is kept apart under one agent
+ * This plugin recognizes three unrelated environment failures — a workspace
+ * that cannot be provisioned (`acl-provisioning`), a persistent shell that
+ * cannot start (`pty-startup`), and a confined Windows child that died during
+ * native initialization (`native-init`). They are different diagnoses with
+ * different remedies, so their bookkeeping is kept apart under one agent
  * ({@link AgentState.families}): an agent that hits both is told about both,
  * and an agent that has already been told about one is still told about the
  * other. Sharing one "already advised" flag would silently swallow the second

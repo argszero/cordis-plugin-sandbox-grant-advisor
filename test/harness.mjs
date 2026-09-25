@@ -8,12 +8,15 @@
  * (the channel the agent loop turns into a durable user-role message), and a
  * denial really stops the tool body from running.
  *
- * What it cannot prove, and does not claim: the Windows ACL path or the Windows
- * PTY path themselves. The fixtures throw the producers' exact error text —
- * taken from `Win32Error`
+ * What it cannot prove, and does not claim: the Windows ACL path, the Windows
+ * PTY path, or the Windows loader behaviour itself. The fixtures throw the
+ * producers' exact error text — taken from `Win32Error`
  * (`packages/subprocess/win32-process/src/errors.ts`) and from
  * `dsh-terminal-bash`'s `session.ts` / `index.ts` — because that text is the
- * plugin's entire input on every platform.
+ * plugin's entire input on every platform. The native-init family needs no
+ * message at all: what it reads is a number inside the canonical value the
+ * shipped shell tools declare, so `shellTool()` carries that value's own shape
+ * and the fixture is faithful in the way that matters for this family.
  *
  * The sandbox-policy stand-in is deliberately not the real service: the point
  * of `sandboxPolicy` in these suites is that its *answer* is what the plugin
@@ -32,6 +35,10 @@ export const REPORTED = 'SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\
 
 /** The exact persistent-shell failure #7638 reports. */
 export const PTY_EXIT = 'PTY shell exited during startup'
+
+// The native-init family's producer shape lives in its own module, so the pure
+// arms can pin it without mounting this harness.
+export { NATIVE_DEATH, MSYS2_STDERR, foreground } from './foreground.mjs'
 
 /** How many tool bodies actually ran, per fixture name. */
 const ran = new Map()
@@ -53,6 +60,44 @@ export function okTool(toolName, value) {
     description: 'integration fixture',
     parameters: { type: 'object', properties: {} },
     output: { schema: { type: 'string' }, render: (_args, settled) => [{ type: 'text', text: settled }] },
+    execute: () => {
+      count(toolName)
+      return Promise.resolve(value)
+    },
+  }
+}
+
+/**
+ * One registrable tool whose body returns a foreground shell projection.
+ *
+ * It is a *successful* call — the whole point of the third family is that the
+ * pipeline reports this failure as a success — so the fixture resolves a value
+ * rather than throwing.
+ * @param toolName - the registered name.
+ * @param value - the canonical value the body returns.
+ * @returns the tool definition.
+ */
+export function shellTool(toolName, value) {
+  return {
+    name: toolName,
+    description: 'foreground shell result fixture',
+    parameters: { type: 'object', properties: {} },
+    output: {
+      // The subset the registry enforces, mirroring the real schema where the
+      // family reads it: `kind` constrains nothing here because the classifier
+      // is what must reject a wrong one, and `exitCode` is the integer-or-null
+      // union the shipped tools declare.
+      schema: {
+        type: 'object',
+        properties: {
+          kind: { type: 'string' },
+          exitCode: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+          stdout: { type: 'object', properties: { text: { type: 'string' } } },
+          stderr: { type: 'object', properties: { text: { type: 'string' } } },
+        },
+      },
+      render: (_args, settled) => [{ type: 'text', text: `(pwsh completed)\n[exit code: ${String(settled.exitCode)}]` }],
+    },
     execute: () => {
       count(toolName)
       return Promise.resolve(value)

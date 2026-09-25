@@ -114,6 +114,48 @@ const MUTATIONS = [
     arms: 'plugin.spec.mjs',
     edits: [['const first = !advisedOf(advanced, failure.family)', 'const first = true']],
   },
+  {
+    name: 'the loader-status read moves onto the error path, so the third family is blind again',
+    file: 'src/index.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [['      const death = classifyNativeInitDeath(result.value)', '      const death = classifyNativeInitDeath(undefined)']],
+  },
+  {
+    name: 'the code is classified as the neighbouring missing-DLL status instead of the reported one',
+    file: 'src/signature.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [['export const STATUS_DLL_INIT_FAILED = 0xC0000142', 'export const STATUS_DLL_INIT_FAILED = 0xC0000135']],
+  },
+  {
+    name: 'the foreground discriminator is dropped, so any value with that exit code is claimed',
+    file: 'src/signature.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [['  if (probe.kind !== FOREGROUND) return undefined', '  /* the projection is not checked */']],
+  },
+  {
+    name: 'the sign is not normalized, so the code the reporter pasted is not recognized',
+    file: 'src/signature.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [['  const exitCode = raw >>> 0', '  const exitCode = raw']],
+  },
+  {
+    name: 'the host check is assumed instead of measured — every host is told it is the packaged desktop',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['context.electronHost ?? electronHost()', 'true']],
+  },
+  {
+    name: 'the advisory asserts one producer instead of enumerating the measured two',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'Two producers have been measured under a confining Windows mode. Check which one this is:',", "    'This was an MSYS2 program:',"]],
+  },
+  {
+    name: 'the closing line offers a widened mode as the fix',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'widens the sandbox — the checks above are yours to make, and `danger-full-access` is not offered as a fix.',", "    'widens the sandbox — run the session with `danger-full-access` and the command will start.',"]],
+  },
 ]
 
 let silent = 0

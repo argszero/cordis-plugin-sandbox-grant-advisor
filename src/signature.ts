@@ -1,5 +1,5 @@
 /**
- * Recognize the two environment failures this plugin explains, and refuse
+ * Recognize the three environment failures this plugin explains, and refuse
  * everything else.
  *
  * ## The ACL provisioning failure (`acl-provisioning`)
@@ -82,6 +82,71 @@
  * different cause space (a slow or blocked shell) with a different remedy, and
  * a classifier that names a wrong cause is worse than one that stays silent.
  *
+ * ## The process that never started (`native-init`)
+ *
+ * The third family is not a message at all: it is a **structured exit code on a
+ * result the pipeline calls a success**. Two reports of one code —
+ * `STATUS_DLL_INIT_FAILED`, `0xC0000142`, seen as `-1073741502` in a tool result
+ * because Windows exit codes are 32-bit NTSTATUS values and Node reports them
+ * signed — describe a confined child that died while its native images were
+ * initializing, i.e. before its entry point. `#7876` is the packaged desktop app:
+ * `sandbox-local` starts the sandbox runner as `[process.execPath, entry]`, and
+ * in that build `process.execPath` is the Electron executable, which starts as an
+ * *app* unless `ELECTRON_RUN_AS_NODE=1` is in the child's environment — so the
+ * runner itself never runs and every confined command reports this code with no
+ * output at all. `#7877` is an MSYS2/Git-Bash program under the restricted
+ * token: bash cannot create its own signal pipe (`couldn't create signal pipe,
+ * Win32 error 5`) and aborts in the same place, while `cmd.exe` and `pwsh` run
+ * fine under the identical mode.
+ *
+ * **This family is the only one that is invisible from the error path**, and that
+ * is the whole reason it is classified from the canonical value instead of from
+ * text. Upstream's runner-failure rules admit exactly one code —
+ * `RUNNER_FAILURE_RULES['windows-acl'] = [{ allowedExitCodes: [127], fatalSignatures:
+ * ['windows-acl-run: '] }]` (`packages/sandbox/sandbox-local/src/index.ts`) — and
+ * `classifyRunnerFailure` skips any other code before it even looks at stderr
+ * (`packages/sandbox/sandbox/src/diagnostics.ts`), so `0xC0000142` is never a
+ * runner failure and `SandboxUnavailableError` is never thrown. The renderer then
+ * reports it the way it reports any finished command — *"Non-zero exits are
+ * reported, not errored … only infrastructure failures (spawn errors, aborts)
+ * surface as isError results"* (`packages/shell/tool-pwsh/src/render.ts`) — as
+ * `[exit code: …]`. A plugin reading only `isError` results (every version of
+ * this one before `0.6.0`) is structurally blind to it, which is exactly why the
+ * model retries a command that can never start.
+ *
+ * The read is `ToolExecutionSuccess.value` — the tool's own canonical output,
+ * documented as *"Execution-local canonical value; deliberately omitted from
+ * durable events"* (`packages/core/tools/src/index.ts`) — so the code arrives
+ * structurally and no line of rendered text can be mistaken for it. Reading it
+ * this way is what makes the recognition safe: a command that prints a line
+ * saying `0xC0000142` is not this failure, and a call whose arguments merely
+ * mention a Windows path is not either.
+ *
+ * Three narrowings, each of which is a thing that could otherwise make the
+ * diagnosis wrong:
+ *
+ * - **The `foreground` discriminator is required.** The shipped shell tools
+ *   project a finished foreground run as `{ kind: 'foreground', exitCode, … }`
+ *   and a still-running background handle as a different shape (`tool-pwsh` /
+ *   `tool-bash`, mirrored by design), so requiring it keeps a value some other
+ *   tool happens to build with an `exitCode` field out of this family. A value
+ *   without it is left alone — the fail-closed direction, since the cost of
+ *   silence is one missing diagnosis and the cost of a wrong match is a confident
+ *   wrong cause.
+ * - **Only `STATUS_DLL_INIT_FAILED` is classified.** `0xC0000142` has producers
+ *   this module does not know about (a program that simply cannot load its own
+ *   DLLs, and the console-hiding that the sandbox backend's own source records as
+ *   producing it), so the advisory enumerates the measured ones and says so
+ *   rather than asserting one. The neighbouring statuses are deliberately **not**
+ *   folded in: `0xC0000409` is the Cygwin/MSYS2 runtime's deliberate fast-fail
+ *   (a different mechanism with a different story), and `0xC0000135` is a missing
+ *   DLL (a packaging problem, not a sandbox one).
+ * - **No platform gate.** The code is a Windows NTSTATUS: a POSIX process cannot
+ *   exit with a value above 255, so the number itself is the platform evidence. A
+ *   `process.platform === 'win32'` check would add nothing a session could
+ *   observe and would make this family untestable on the host this plugin is
+ *   built on — which is how a family ships without ever having been run.
+ *
  * @module
  */
 
@@ -110,6 +175,8 @@ export type FailureFamily =
   | 'acl-provisioning'
   /** The persistent PTY shell could not start under a confining sandbox mode. */
   | 'pty-startup'
+  /** A confined Windows child died while its native images were initializing. */
+  | 'native-init'
 
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
@@ -145,8 +212,40 @@ export interface PtyStartupFailure {
   readonly line: string
 }
 
+/**
+ * `STATUS_DLL_INIT_FAILED`, the code a Windows process is terminated with when
+ * the loader fails while initializing it — before its entry point runs.
+ *
+ * Written unsigned here, which is how the NTSTATUS is named; a tool result
+ * usually carries it as the 32-bit signed number (`-1073741502`), and
+ * {@link classifyNativeInitDeath} accepts either because it compares the
+ * normalized 32-bit pattern.
+ */
+export const STATUS_DLL_INIT_FAILED = 0xC0000142
+
+/** The `kind` discriminator the shipped shell tools put on a finished foreground run. */
+const FOREGROUND = 'foreground'
+
+/**
+ * The code a confined Windows child died with, and the forms the caller may have
+ * to quote it in.
+ *
+ * There is no `path` and no `api` here: the producer of this failure is the
+ * operating system's loader, which reports only the status. What the diagnosis
+ * needs beyond the code — the effective sandbox mode — comes from the policy
+ * resolver at the call site, exactly as it does for the PTY family.
+ */
+export interface NativeInitFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'native-init'
+  /** The exit code exactly as the tool reported it, so it can be quoted back verbatim. */
+  readonly rawExitCode: number
+  /** The same code normalized to its unsigned 32-bit form, for comparison and printing. */
+  readonly exitCode: number
+}
+
 /** Any failure this plugin recognizes, tagged by family. */
-export type RecognizedFailure = ProvisioningFailure | PtyStartupFailure
+export type RecognizedFailure = ProvisioningFailure | PtyStartupFailure | NativeInitFailure
 
 /**
  * The producer's format is fixed by `Win32Error`
@@ -213,12 +312,47 @@ export function classifyPtyStartupFailure(message: string): PtyStartupFailure | 
 }
 
 /**
+ * Classify one **successful** execution's canonical value as a Windows native-init
+ * death.
+ *
+ * This is the only family read from a result the pipeline calls a success, and
+ * that is a fact about the producer rather than a choice: the code reaches the
+ * tool result as an ordinary nonzero exit status (upstream's runner-failure rules
+ * admit only exit `127` with the `windows-acl-run: ` signature, so this one is
+ * never reclassified), and the renderer reports nonzero exits without erroring.
+ * `ToolExecutionFailure` carries no value at all, so there is nothing to read on
+ * the error path — a session sees this failure exactly when its shell tool
+ * reports a command that "ran".
+ *
+ * Recognized structurally, never from text: the value must be the foreground
+ * shell projection (`kind: 'foreground'`) with an integer `exitCode` whose 32-bit
+ * pattern is {@link STATUS_DLL_INIT_FAILED}. A command's own output claiming the
+ * code cannot reach this function, and neither can a value some other tool built
+ * with an `exitCode` field.
+ * @param value - the settled execution's canonical value (`ToolExecutionSuccess.value`).
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyNativeInitDeath(value: unknown): NativeInitFailure | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const probe = value as { kind?: unknown, exitCode?: unknown }
+  if (probe.kind !== FOREGROUND) return undefined
+  const raw = probe.exitCode
+  if (typeof raw !== 'number' || !Number.isInteger(raw)) return undefined
+  // `>>> 0` maps the signed form Node reports on Windows onto the unsigned
+  // NTSTATUS, and leaves a value that is already unsigned alone.
+  const exitCode = raw >>> 0
+  if (exitCode !== STATUS_DLL_INIT_FAILED) return undefined
+  return { family: 'native-init', rawExitCode: raw, exitCode }
+}
+
+/**
  * The one-line failure the producer wrote, for quoting back verbatim.
  * @param failure - a recognized failure.
  * @returns the message text the producing layer would have produced.
  */
 export function failureLine(failure: RecognizedFailure): string {
   if (failure.family === 'pty-startup') return failure.line
+  if (failure.family === 'native-init') return `[exit code: ${String(failure.rawExitCode)}]`
   const suffix = failure.detail.length === 0 ? '' : `: ${failure.detail}`
   return `${failure.api} failed (Win32 ${failure.win32Code})${suffix}`
 }

@@ -2,7 +2,7 @@
  * `sandbox-grant-advisor`: turn an environment failure that has no path forward
  * into a diagnosis the model — and the user reading the transcript — can act on.
  *
- * ## The two failures it recognizes
+ * ## The three failures it recognizes
  *
  * **Workspace provisioning (Windows ACL).** Four reports of one signature
  * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
@@ -40,13 +40,42 @@
  * `danger-full-access` succeeds, `standard` (one-shot shell) × confining
  * succeeds.
  *
+ * **A confined child that never started (native init, `#7876` + `#7877`).** The
+ * third family is not a message at all: two reports of one exit code —
+ * `0xC0000142` `STATUS_DLL_INIT_FAILED` — describing a child that died while the
+ * loader was initializing its native images, before its entry point. In `#7876`
+ * the packaged desktop's sandbox runner never runs, because `sandbox-local`
+ * starts it as `[process.execPath, entry]` and in that build `process.execPath`
+ * is the Electron executable, which starts as an *application* unless the child
+ * carries `ELECTRON_RUN_AS_NODE=1` — so every confined command reports this code
+ * with no output at all, while the unpacked `node apps/cli/lib/bin.js web` host
+ * is unaffected. In `#7877` it is an MSYS2/Git-Bash program: under the restricted
+ * token bash cannot create its own signal pipe (`couldn't create signal pipe,
+ * Win32 error 5`), so it dies in the same phase, while `cmd.exe` and `pwsh` run
+ * fine under the identical mode. Retrying is the one thing that cannot work, and
+ * the code tells the model nothing on its own.
+ *
+ * This family is read from the **canonical value of a successful result**, which
+ * is why the seam below now inspects both outcomes. The producer never marks it
+ * an error: upstream's runner-failure rules admit only exit `127` with the
+ * `windows-acl-run: ` signature (`packages/sandbox/sandbox-local/src/index.ts`),
+ * `classifyRunnerFailure` skips every other code before it looks at stderr
+ * (`packages/sandbox/sandbox/src/diagnostics.ts`), and the renderer reports a
+ * nonzero exit as `[exit code: N]` rather than as `isError`
+ * (`packages/shell/tool-pwsh/src/render.ts`). Every version of this plugin
+ * before `0.6.0` read error results only and was structurally blind to it. See
+ * `src/signature.ts` for why the read is `ToolExecutionSuccess.value` — the
+ * tool's own canonical output, never a line of rendered text — and which three
+ * narrowings keep the recognition from firing on something else.
+ *
  * ## Where it acts, and why there
  *
  * One listener on the public `tools/post-execute` waterfall
  * (`@deepseek-ai/dsh-tools`). Admissibility was decided by which half of the
  * defect this seam can reach: the failure text (the provider propagates its
- * error unchanged, and the tool pipeline turns it into an `isError` result), an
- * agent identity to attribute it to (`exec.agent`), and a channel that speaks
+ * error unchanged, and the tool pipeline turns it into an `isError` result) or,
+ * for the native-init family, the canonical value a successful result carries,
+ * an agent identity to attribute it to (`exec.agent`), and a channel that speaks
  * to the model in the same step (`PostToolDecision`'s `additionalContexts`,
  * a durable user-role message).
  *
@@ -71,7 +100,14 @@
  *    right and are not (`takeown`, `icacls /reset`), each with its reason. For the PTY family it names the
  *    combination that fails (persistent PTY × a confining mode), states the
  *    resolved mode, says plainly that no command can fix it, and hands the
- *    user-side preset choice over. Both ride `additionalContexts`, so the model
+ *    user-side preset choice over. For the native-init family it states the
+ *    resolved mode, says the process never reached its entry point, enumerates
+ *    the two producers measured under a confining mode with the check that
+ *    separates them (what program the reader ran; whether this host is the
+ *    packaged desktop binary, which the plugin **measures and reports** rather
+ *    than assumes), and carries the one conversion a model can actually make —
+ *    rewrite the work as PowerShell or `cmd` when the program that could not
+ *    start was an MSYS2 one. All three ride `additionalContexts`, so the model
  *    sees the diagnosis beside the failure rather than only in a log it never
  *    reads.
  * 2. **A bounded fail-fast, ACL family only.** With `enforceAfter` set, a call
@@ -80,9 +116,10 @@
  *    default: the useful signal here is the diagnosis, and a plugin that blocks
  *    command execution for a reason it merely recognizes is a risk, not a
  *    feature. See the README for why the blocking half is deliberately narrow
- *    and why it does not cover the PTY family.
- * 3. **A disclosure when it withholds.** The PTY advisory is only sent when the
- *    resolved mode actually confines; if the mode is not confining, or cannot be
+ *    and why it does not cover the two mode-gated families.
+ * 3. **A disclosure when it withholds.** The PTY and native-init advisories are
+ *    only sent when the resolved mode actually confines; if the mode is not
+ *    confining, or cannot be
  *    resolved at all, the failure is left exactly as it was **and the host log
  *    says so once**. Silence alone would make "the sandbox is not the cause" and
  *    "this plugin could not tell" indistinguishable from the outside.
@@ -96,20 +133,30 @@
  *   `ToolRuntime` — against synthetic results carrying the producers' exact
  *   error shapes, with the formats taken from
  *   `packages/subprocess/win32-process/src/errors.ts` and
- *   `packages/terminal/terminal-bash/src/{index,session}.ts`.
+ *   `packages/terminal/terminal-bash/src/{index,session}.ts`. The native-init
+ *   family is exercised the same way and needs no Windows to be faithful, because
+ *   what it reads is a number in a JSON value: the test builds the shipped shell
+ *   tools' own foreground projection with the reported codes, including the
+ *   signed form the reporter saw (`-1073741502`) and the real MSYS2 stderr, so the
+ *   recognition runs against the producer's data rather than against a message
+ *   this plugin invented.
  * - **It does not repair anything.** No ACL is written, no privilege is
- *   requested, nothing is elevated, no preset is installed and no mode is
- *   changed: both remedies are the user's to apply.
+ *   requested, nothing is elevated, no environment variable is set for another
+ *   process, no preset is installed and no mode is changed: the remedies are the
+ *   user's (or, for the one in-session conversion, the model's own rewrite).
  * - **It complements, rather than replaces, `repeat-guard-escalation`.** That
  *   guard keys on *call identity* (identical arguments retried); this one keys
  *   on the *environment signature*, which is how several different commands can
  *   share one cause. They can be mounted together.
- * - **The real fix is upstream**, in both families: the ACL failure should name
+ * - **The real fix is upstream**, in all three families: the ACL failure should
+ *   name
  *   the outstanding condition at the site that knows it (`grantWrite` computes
  *   `hasExactGrant`/`hasExactDeny`/`hasExactLabel` and discards which was
- *   false), and the PTY startup path should either report "this sandbox mode is
- *   incompatible with the PTY backend" or fall back to a one-shot shell. This
- *   plugin is the stopgap.
+ *   false), the PTY startup path should either report "this sandbox mode is
+ *   incompatible with the PTY backend" or fall back to a one-shot shell, and the
+ *   sandbox runner should be launched with the environment its own execution
+ *   needs (`ELECTRON_RUN_AS_NODE` when argv[0] is an Electron binary) or with a
+ *   documented, checkable refusal for MSYS2 programs. This plugin is the stopgap.
  *
  * @module @argszero/cordis-plugin-sandbox-grant-advisor
  */
@@ -119,10 +166,10 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { advisoryText, ACL_DISCUSSIONS, denialText, PTY_DISCUSSIONS } from './advice.js'
+import { advisoryText, ACL_DISCUSSIONS, denialText, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS } from './advice.js'
 import type { AdvisoryContext } from './advice.js'
-import { classifyProvisioningFailure, classifyPtyStartupFailure } from './signature.js'
-import type { ProvisioningFailure, RecognizedFailure } from './signature.js'
+import { classifyNativeInitDeath, classifyProvisioningFailure, classifyPtyStartupFailure } from './signature.js'
+import type { NativeInitFailure, ProvisioningFailure, PtyStartupFailure, RecognizedFailure } from './signature.js'
 import { confines, resolveSandboxMode } from './mode.js'
 import type { SandboxModeName } from './mode.js'
 import {
@@ -163,8 +210,9 @@ export const DEFAULT_MAX_DENIALS = 2
  * The family the optional blocking half applies to.
  *
  * The ACL remedy is a command the user can run while the session continues; the
- * PTY remedy is a preset swap between sessions. Refusing calls is only useful
- * in the first case — see `denialText` in `src/advice.ts`.
+ * PTY remedy is a preset swap between sessions and the native-init remedy is a
+ * user-side launch fix (or a rewrite the model makes itself), so refusing calls
+ * is only useful in the first case — see `denialText` in `src/advice.ts`.
  */
 export const ENFORCED_FAMILY = 'acl-provisioning'
 
@@ -173,8 +221,9 @@ export interface Config {
   /**
    * ACL provisioning failures after which an identical, already-failing call is
    * denied before dispatch. `0` (the default) disables the half entirely; the
-   * advisory half is unaffected and always on. The blocking half does not apply
-   * to the persistent-shell family.
+   * advisory half is unaffected and always on. The blocking half applies to the
+   * ACL family alone: it does not cover the persistent-shell or native-init
+   * families, whose remedies are not a command the session can wait out.
    */
   enforceAfter?: number
   /**
@@ -253,6 +302,23 @@ function ptyHostLine(mode: SandboxModeName): string {
 }
 
 /**
+ * The one-line host-side account of a recognized native-init death.
+ *
+ * It names the two things a maintainer needs to place the report — the code and
+ * the mode the call ran under — and deliberately not a cause: the code alone
+ * cannot say which producer it was, and a log line that guesses is the same
+ * defect as an advisory that guesses.
+ * @param failure - the recognized failure.
+ * @param mode - the resolved sandbox mode the failing call ran under.
+ * @returns a single log line.
+ */
+function nativeInitHostLine(failure: NativeInitFailure, mode: SandboxModeName): string {
+  return `sandbox-grant-advisor: sandboxed command reported exit ${String(failure.rawExitCode)} `
+    + `(0x${failure.exitCode.toString(16).toUpperCase()} STATUS_DLL_INIT_FAILED) under sandbox mode "${mode}" — the child died before `
+    + `its entry point, so retrying cannot help; advisory delivered to the model (discussions ${NATIVE_INIT_DISCUSSIONS})`
+}
+
+/**
  * Wrap one notice as a user-role message.
  *
  * The double cast encodes a documented fact the installed type cannot express:
@@ -286,9 +352,14 @@ function prepend(ours: UserMessage, theirs: readonly UserMessage[] | undefined):
 
 /** The one-line transcript summary for a recognized failure. */
 function summaryOf(failure: RecognizedFailure, mode?: SandboxModeName): string {
-  return failure.family === 'pty-startup'
-    ? `persistent shell exited during startup under sandbox mode "${String(mode)}"`
-    : `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
+  if (failure.family === 'pty-startup') {
+    return `persistent shell exited during startup under sandbox mode "${String(mode)}"`
+  }
+  if (failure.family === 'native-init') {
+    return `sandboxed command never started (exit ${String(failure.rawExitCode)}, STATUS_DLL_INIT_FAILED) `
+      + `under sandbox mode "${String(mode)}"`
+  }
+  return `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
 }
 
 /**
@@ -328,18 +399,29 @@ export function apply(ctx: Context, config: Config = {}): void {
    * Withholding is a decision, not an absence: the transcript shows a bare error
    * either way, so the difference between "this is not the sandbox's doing" and
    * "this plugin could not tell" has to be recorded where a maintainer reads it.
-   * Once per agent, because a loop can produce dozens of these.
+   * Once per agent, because a loop can produce dozens of these. The cited thread
+   * is the *family's* — a withheld native-init death and a withheld PTY startup
+   * failure are different reports, and pointing a maintainer at the wrong one
+   * would be its own small misdiagnosis.
    * @param agent - the agent whose failure was withheld.
    * @param state - the agent's state, to keep the note to one.
    * @param why - what stopped the advisory.
+   * @param failure - the recognized failure that was withheld; only the two
+   *   mode-gated families reach this function, so the thread it cites is exact.
    * @returns undefined, so callers can `return withhold(...)`.
    */
-  function withhold(agent: Agent, state: AgentState | undefined, why: string): undefined {
+  function withhold(
+    agent: Agent,
+    state: AgentState | undefined,
+    why: string,
+    failure: PtyStartupFailure | NativeInitFailure,
+  ): undefined {
     if (state?.withheld === true) return undefined
     states.set(agent, recordWithheld(state))
+    const discussions = failure.family === 'pty-startup' ? PTY_DISCUSSIONS : NATIVE_INIT_DISCUSSIONS
     ctx.logger.warn(
-      `sandbox-grant-advisor: persistent-shell startup failure recognized but no advisory sent — ${why}; the raw `
-      + `error is left exactly as it is, so this is NOT a claim that the sandbox is unrelated (discussion ${PTY_DISCUSSIONS})`,
+      `sandbox-grant-advisor: ${failure.family} failure recognized but no advisory sent — ${why}; the raw `
+      + `error is left exactly as it is, so this is NOT a claim that the sandbox is unrelated (discussions ${discussions})`,
     )
     return undefined
   }
@@ -361,10 +443,19 @@ export function apply(ctx: Context, config: Config = {}): void {
     const key = callKey(exec.name, exec.arguments)
     const previous = states.get(agent)
     if (result.isError !== true) {
-      if (previous !== undefined) states.set(agent, observeSuccess(previous, key))
-      return undefined
+      // A result the pipeline calls a success is not automatically a working
+      // environment: the native-init death arrives exactly here, as the
+      // canonical value of a command that "finished" with a loader status. It is
+      // read from `result.value` and never from the rendered text, so a command
+      // whose own output mentions the code cannot be mistaken for it.
+      const death = classifyNativeInitDeath(result.value)
+      if (death === undefined) {
+        if (previous !== undefined) states.set(agent, observeSuccess(previous, key))
+        return undefined
+      }
+      return adviseGated(agent, previous, death, key, exec.name)
     }
-    // The two families read different fields, on purpose. The ACL signature
+    // The two text families read different fields, on purpose. The ACL signature
     // carries an API name plus a Win32 code, which a command's own output does
     // not fabricate, so that family may read the merged text (`error.message`
     // with the rendered content as its fallback). The persistent-shell
@@ -385,30 +476,50 @@ export function apply(ctx: Context, config: Config = {}): void {
     const failure = classifyProvisioningFailure(failureText(result))
       ?? classifyPtyStartupFailure(result.error.message)
     if (failure === undefined) return undefined
-
-    // The PTY diagnosis IS the sandbox mode, so it is resolved before anything
-    // is recorded: an unconfined mode is not this family's story, and a mode
-    // that cannot be resolved is not something to guess at. Either way the
-    // failure is left untouched and the host log accounts for the silence.
-    if (failure.family === 'pty-startup') {
-      const resolution = resolveSandboxMode(ctx, agent)
-      if (!resolution.ok) return withhold(agent, previous, resolution.withheld)
-      const mode = resolution.mode
-      if (!confines(mode)) {
-        return withhold(
-          agent,
-          previous,
-          `the failing call ran under \`${mode}\`, where the shell is not spawned through the sandbox`,
-        )
-      }
-      if (!claimAdvice(agent, previous, failure, key)) return undefined
-      ctx.logger.warn(ptyHostLine(mode))
-      return notice(advisoryText(failure, advisoryContext(exec.name, mode)), summaryOf(failure, mode))
-    }
+    if (failure.family === 'pty-startup') return adviseGated(agent, previous, failure, key, exec.name)
 
     if (!claimAdvice(agent, previous, failure, key)) return undefined
     ctx.logger.warn(aclHostLine(failure))
     return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
+  }
+
+  /**
+   * Diagnose one recognized failure of a **mode-gated** family.
+   *
+   * Both families the plugin gates on the sandbox mode — the persistent shell
+   * and the native-init death — need the same three decisions before anything is
+   * said, and they need them in the same order, so they share one implementation
+   * rather than one each: the effective mode is resolved from the agent's own
+   * session, a mode that does not confine withholds the advisory (the harness
+   * does not spawn commands through the sandbox there, so this is not these
+   * families' story), and a mode that cannot be resolved withholds it too rather
+   * than falling back to a guess. In both withholding cases the failure is left
+   * untouched and the host log accounts for the silence once.
+   * @param agent - the agent whose call failed.
+   * @param previous - the agent's state before this call, if any.
+   * @param failure - the recognized failure, already known to be a gated family.
+   * @param key - the identity of the failing call.
+   * @param tool - the failing tool's name, for the advisory context.
+   * @returns the notice to attach, or undefined.
+   */
+  function adviseGated(
+    agent: Agent,
+    previous: AgentState | undefined,
+    failure: PtyStartupFailure | NativeInitFailure,
+    key: string,
+    tool: string,
+  ): UserMessage | undefined {
+    const resolution = resolveSandboxMode(ctx, agent)
+    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, failure)
+    const mode = resolution.mode
+    if (!confines(mode)) {
+      const what = failure.family === 'pty-startup' ? 'the shell' : 'the command'
+      return withhold(agent, previous, `the failing call ran under \`${mode}\`, where ${what} is not spawned `
+        + 'through the sandbox', failure)
+    }
+    if (!claimAdvice(agent, previous, failure, key)) return undefined
+    ctx.logger.warn(failure.family === 'pty-startup' ? ptyHostLine(mode) : nativeInitHostLine(failure, mode))
+    return notice(advisoryText(failure, advisoryContext(tool, mode)), summaryOf(failure, mode))
   }
 
   /**

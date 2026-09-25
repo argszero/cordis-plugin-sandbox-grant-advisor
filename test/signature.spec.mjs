@@ -12,8 +12,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { advisoryText, denialText, ACL_DISCUSSIONS, PREREQUISITE, PTY_DISCUSSIONS } from '../lib/advice.js'
-import { classifyProvisioningFailure, classifyPtyStartupFailure, failureLine } from '../lib/signature.js'
+import {
+  advisoryText,
+  denialText,
+  ACL_DISCUSSIONS,
+  NATIVE_INIT_DISCUSSIONS,
+  PREREQUISITE,
+  PTY_DISCUSSIONS,
+} from '../lib/advice.js'
+import {
+  classifyNativeInitDeath,
+  classifyProvisioningFailure,
+  classifyPtyStartupFailure,
+  failureLine,
+  STATUS_DLL_INIT_FAILED,
+} from '../lib/signature.js'
+import { foreground, MSYS2_STDERR, NATIVE_DEATH } from './foreground.mjs'
 
 /** The exact text reported in #7538 / #7622 / #7646. */
 const REPORTED = 'SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'
@@ -431,4 +445,157 @@ test('each family explains itself instead of borrowing the other\'s story', () =
   assert.notEqual(acl, pty)
   assert.match(pty, /`read-only`/, 'the mode is quoted as resolved, without translation')
   assert.doesNotMatch(pty, /MERGED write|SACL|SeSecurityPrivilege/)
+})
+
+test('the loader status is recognized from the canonical value, in both spellings of the sign', () => {
+  // #7877 pastes the signed form; the unsigned NTSTATUS spelling is the same
+  // number. `>>> 0` is what makes the classifier indifferent to which one arrives.
+  for (const exitCode of [-1073741502, 3221225794, 0xC0000142]) {
+    const failure = classifyNativeInitDeath(foreground(exitCode))
+    assert.ok(failure, `must classify: ${String(exitCode)}`)
+    assert.equal(failure.family, 'native-init')
+    assert.equal(failure.rawExitCode, exitCode, 'the code as reported is kept, so it can be quoted back')
+    assert.equal(failure.exitCode, STATUS_DLL_INIT_FAILED)
+    assert.equal(failureLine(failure), `[exit code: ${String(exitCode)}]`)
+  }
+  assert.equal(STATUS_DLL_INIT_FAILED, 0xC0000142)
+})
+
+test('a value that is not the shipped foreground projection is refused', () => {
+  // The family is read from a result the pipeline calls a success, so the
+  // discriminator that keeps other tools out is the projection's own `kind` —
+  // and the neighbouring statuses are other stories this module must not tell.
+  for (const value of [
+    undefined,
+    null,
+    'foreground',
+    42,
+    [],
+    {},
+    { exitCode: -1073741502 },
+    { kind: 'background', exitCode: -1073741502 },
+    { kind: 'foreground' },
+    { kind: 'foreground', exitCode: null },
+    { kind: 'foreground', exitCode: '-1073741502' },
+    { kind: 'foreground', exitCode: 1.5 },
+    // Other Windows statuses with their own causes: the Cygwin/MSYS2 runtime's
+    // deliberate fast-fail, and a missing DLL (a packaging problem, not a
+    // sandbox one). Neither is this family.
+    { kind: 'foreground', exitCode: -1073740791 }, // 0xC0000409
+    { kind: 'foreground', exitCode: -1073741515 }, // 0xC0000135
+    { kind: 'foreground', exitCode: 127 }, // the one code the runner-failure rule owns
+    { kind: 'foreground', exitCode: 1 },
+    { kind: 'foreground', exitCode: 0 },
+  ]) {
+    assert.equal(classifyNativeInitDeath(value), undefined, `must not classify: ${JSON.stringify(value)}`)
+  }
+})
+
+test('the native-init advisory names the class, both producers, and their checks', () => {
+  const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH, MSYS2_STDERR))
+  assert.ok(failure)
+  const text = advisoryText(failure, { mode: 'read-only', tool: 'pwsh', electronHost: false })
+  const flat = text.replace(/\s+/g, ' ')
+  // The code, quoted as the tool reported it and named for what it is.
+  assert.match(flat, /\[exit code: -1073741502\]/)
+  assert.match(flat, /0xC0000142 STATUS_DLL_INIT_FAILED/)
+  // The claim that makes it a diagnosis rather than a restatement: the process
+  // never reached its entry point, and the number is not a portable status.
+  assert.match(flat, /BEFORE the program's entry point/)
+  assert.match(flat, /those are 0-255, and this is a 32-bit NTSTATUS/)
+  // The mode the call ran under is stated, and is where the sandbox becomes a
+  // candidate rather than an assertion.
+  assert.match(flat, /sandbox mode `read-only`/)
+  assert.match(flat, /Nothing in the code says "sandbox" by itself/)
+  // It enumerates rather than asserts: the header is the claim that this is a
+  // list to be checked, not a cause that was identified.
+  assert.match(flat, /Two producers have been measured under a confining Windows mode\. Check which one this is:/)
+  // Producer 1: the MSYS2 runtime, with the report's own line and the one
+  // conversion the model can actually make.
+  assert.match(flat, /couldn't create signal pipe, Win32 error 5/)
+  assert.match(flat, /#7877/)
+  assert.match(flat, /write the same work as a PowerShell or `cmd` command instead/)
+  // Producer 2: the packaged desktop runner, with the mechanism and the report's
+  // discriminator.
+  assert.match(flat, /ELECTRON_RUN_AS_NODE=1/)
+  assert.match(flat, /\[process\.execPath, runner\.js\]/)
+  assert.match(flat, /#7876/)
+  // The measured fact about THIS process, not an assumption about it: this arm
+  // runs off the packaged desktop, so the producer that needs Electron is ruled
+  // out — and it says why.
+  assert.match(flat, /This process is NOT an Electron binary/)
+  assert.match(flat, /the runner is a real Node binary here/)
+  assert.doesNotMatch(flat, /This process IS an Electron binary/)
+  // The instruction, and the boundary that keeps the claim honest.
+  assert.match(flat, /Do not retry this call/)
+  assert.match(flat, /Convert the work only in case 1; otherwise stop and hand it to the user/)
+  assert.match(flat, /producers this list does not have/)
+  assert.match(flat, /hidden console window/)
+  // What it must NOT say: the other families' stories, or an offer to widen the
+  // sandbox as a remedy.
+  assert.doesNotMatch(text, /icacls|WRITE_OWNER|SeSecurityPrivilege/)
+  assert.doesNotMatch(text, /PTY shell exited during startup/)
+  assert.doesNotMatch(flat, /use danger-full-access to fix/)
+  assert.match(flat, /`danger-full-access` is not offered as a fix/)
+  assert.match(flat, new RegExp(NATIVE_INIT_DISCUSSIONS))
+})
+
+test('the Electron fact is reported, so the same code reads differently on the two hosts', () => {
+  // The check is a fact the plugin measures rather than one it asks the reader
+  // for, so the two answers must actually differ — a producer list that reads the
+  // same either way would be a guess wearing a measurement's clothes.
+  const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH))
+  assert.ok(failure)
+  const onElectron = advisoryText(failure, { mode: 'workspace-write', electronHost: true })
+  const offElectron = advisoryText(failure, { mode: 'workspace-write', electronHost: false })
+  assert.notEqual(onElectron, offElectron)
+  assert.match(onElectron.replace(/\s+/g, ' '), /This process IS an Electron binary/)
+  assert.doesNotMatch(onElectron.replace(/\s+/g, ' '), /This process is NOT an Electron binary/)
+  // Everything else about the two texts is identical: only the finding — and the
+  // next step it implies — differs. The rest of the advisory is one text, not two.
+  const head = text => text.slice(0, text.indexOf('     This process '))
+  const tail = text => text.slice(text.indexOf('Do not retry this call'))
+  assert.equal(head(onElectron), head(offElectron))
+  assert.equal(tail(onElectron), tail(offElectron))
+  // Each branch ends with a next step rather than a dead end: the Electron host
+  // gets the report's own discriminator, the other one is told the failure is
+  // outside both measured producers.
+  assert.match(onElectron.replace(/\s+/g, ' '), /run the same command with `danger-full-access`/)
+  assert.match(onElectron.replace(/\s+/g, ' '), /unpacked `node apps\/cli\/lib\/bin\.js web`/)
+  assert.match(offElectron.replace(/\s+/g, ' '), /outside both measured producers/)
+  // With no explicit answer the plugin asks the live process, which on the host
+  // this suite runs on is not Electron — and says so rather than staying silent.
+  assert.match(advisoryText(failure, { mode: 'workspace-write' }), /This process is NOT an Electron binary/)
+})
+
+test('the native-init advisory refuses to be built without the mode it explains', () => {
+  const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH))
+  assert.ok(failure)
+  assert.throws(() => advisoryText(failure), /requires the resolved sandbox mode/)
+  assert.throws(() => advisoryText(failure, { tool: 'pwsh' }), /requires the resolved sandbox mode/)
+})
+
+test('the third family names itself, and borrows neither of the other two stories', () => {
+  const native = advisoryText(classifyNativeInitDeath(foreground(NATIVE_DEATH)), { mode: 'read-only' })
+  assert.match(native, /`read-only`/)
+  assert.notEqual(native, advisoryText(classifyProvisioningFailure(REPORTED)))
+  assert.notEqual(native, advisoryText(classifyPtyStartupFailure(PTY_EXIT), { mode: 'read-only' }))
+  // An href replaces the thread line, exactly as in the other two families.
+  const linked = advisoryText(classifyNativeInitDeath(foreground(NATIVE_DEATH)), {
+    mode: 'read-only',
+    href: 'https://example.invalid/t/11',
+  })
+  assert.match(linked, /tracked upstream: https:\/\/example\.invalid\/t\/11/)
+  assert.doesNotMatch(linked, new RegExp(NATIVE_INIT_DISCUSSIONS))
+})
+
+test('the three families share no message: each producer\'s input reaches exactly one classifier', () => {
+  assert.equal(classifyProvisioningFailure(PTY_EXIT), undefined)
+  assert.equal(classifyPtyStartupFailure(REPORTED), undefined)
+  // The native-init family is not text-driven at all, so no message can reach it
+  // and no value can reach the other two.
+  assert.equal(classifyNativeInitDeath(REPORTED), undefined)
+  assert.equal(classifyNativeInitDeath(PTY_EXIT), undefined)
+  assert.equal(classifyProvisioningFailure('[exit code: -1073741502]'), undefined)
+  assert.equal(classifyPtyStartupFailure('[exit code: -1073741502]'), undefined)
 })

@@ -1,27 +1,32 @@
 # @argszero/cordis-plugin-sandbox-grant-advisor
 
 Turns a sandbox environment failure that has **no path forward** into a
-diagnosis the model — and the user reading the transcript — can act on. Two
+diagnosis the model — and the user reading the transcript — can act on. Three
 signatures, one mechanism:
 
 ```
 SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\ws)   # Windows workspace ACL
 PTY shell exited during startup                             # persistent shell × confining mode
+[exit code: -1073741502]  (0xC0000142)                      # a confined child that never started
 ```
 
 **This plugin is the stopgap for "the error does not name the outstanding
 condition".** It repairs nothing: no ACL is written, no privilege is requested,
-nothing is elevated, no preset is installed and no mode is changed.
+nothing is elevated, no environment variable is set for another process, no
+preset is installed and no mode is changed.
 
-## The two failures it recognizes
+## The three failures it recognizes
 
-Both are recognized on the public **`tools/post-execute`** waterfall
-(`@deepseek-ai/dsh-tools`) — the one seam that has all three of: the failure text
+The first two are recognized on the public **`tools/post-execute`** waterfall
+(`@deepseek-ai/dsh-tools`) from the failure text. That seam is the one that has
+all three of what a diagnosis needs: the failure
 (providers propagate their error unchanged and the tool pipeline settles it as an
 `isError` result), an agent identity to attribute it to (`exec.agent`), and a
 channel that speaks to the model in the same step (`PostToolDecision`'s
 `additionalContexts`, which the agent loop turns into a durable user-role message
-— `packages/core/agent-loop/src/tool-calls.ts`).
+— `packages/core/agent-loop/src/tool-calls.ts`). The third is recognized at the
+**same seam** from the canonical value of a result the pipeline calls a
+*success*, for a reason §3 gives in full.
 
 That seam, not `ctx.sandbox.confine`: `confine(argv, policy, signal)` sees the
 confinement failure too, but its signature carries no agent, so a wrapper could
@@ -229,15 +234,111 @@ reads it any more (`@deepseek-ai/dsh-agent-preset-registry`: the registry
 by row id (`preset-minimal`) for a change to a shipped one. A test arm asserts
 the advisory never names the dead directory.
 
+### 3. A confined child that never started (`native-init`)
+
+Two reports of one exit code: [`#7876`] (the packaged desktop app) and [`#7877`]
+(MSYS2 / Git Bash). Both are `0xC0000142` `STATUS_DLL_INIT_FAILED` — the Windows
+loader terminated the process while it was initializing its native images, i.e.
+**before the program's entry point**. A command that ran and then failed exits
+with its own status and prints its own output; this one produced neither.
+
+| what was run | what came out | exit code |
+| --- | --- | --- |
+| `cmd.exe /c "echo cmd-ok"` | `cmd-ok` | 0 |
+| `pwsh -NoLogo -NoProfile -Command "Write-Output pwsh-ok"` | `pwsh-ok` | 0 |
+| `D:\Git\bin\bash.exe -c "echo bash-ok"` | `couldn't create signal pipe, Win32 error 5` | `-1073741502` |
+
+Two producers have been measured under a confining mode:
+
+1. **An MSYS2 / Git-Bash program** ([`#7877`]). The restricted token's runtime
+   cannot create the pipe it uses for signals, so bash aborts in the loader
+   phase, while `cmd.exe` and `pwsh` run fine in the same workspace under the
+   same mode. The plugin's own composition has no way around this: `tool-bash`
+   and `bash-sandbox` are `disabled` on win32
+   (`@deepseek-ai/dsh-base/cordis.patch.yml`), so the combination is likely
+   never covered upstream. The **one conversion a model can make itself** is to
+   write the same work as a PowerShell or `cmd` command.
+2. **The packaged desktop app's sandbox runner** ([`#7876`]).
+   `dsh-sandbox-local` launches the runner as `[process.execPath, entry]`, and
+   in the packaged build `process.execPath` is the Electron executable, which
+   starts as an *application* unless the child's environment carries
+   `ELECTRON_RUN_AS_NODE=1` — so the runner never runs and every confined command
+   reports this code with **no output at all**. The unpacked node host
+   (`node apps/cli/lib/bin.js web`) is unaffected. The plugin reports whether
+   *this* process is an Electron binary (`process.versions.electron`) as a
+   measured fact rather than assuming it, because that is the check the
+   discriminator turns on.
+
+**Why this family is read from a successful result.** The producer never marks
+it an error, and that is a fact about upstream rather than a choice here:
+`RUNNER_FAILURE_RULES['windows-acl']` admits exactly one code —
+`[{ allowedExitCodes: [127], fatalSignatures: ['windows-acl-run: '] }]`
+(`packages/sandbox/sandbox-local/src/index.ts`) — and `classifyRunnerFailure`
+skips any other code before it looks at stderr
+(`packages/sandbox/sandbox/src/diagnostics.ts`), so `0xC0000142` is never a
+runner failure and `SandboxUnavailableError` is never thrown. The renderer then
+reports it the way it reports any finished command — *"Non-zero exits are
+reported, not errored … only infrastructure failures (spawn errors, aborts)
+surface as isError results"* (`packages/shell/tool-pwsh/src/render.ts`) — as
+`[exit code: …]`. **Every version of this plugin before 0.6.0 read error results
+only and was structurally blind to it**, which is exactly why the model retries a
+command that can never start.
+
+The read is `ToolExecutionSuccess.value` — the tool's own canonical output,
+documented as *"Execution-local canonical value; deliberately omitted from
+durable events"* **and not carried on failure results at all** — so the code
+arrives structurally rather than as a line of text. A command that prints
+`[exit code: -1073741502]` is not this failure, and neither is a value some other
+tool happens to build with an `exitCode` field: the classifier requires the
+shipped shell projection (`kind: 'foreground'` plus an integer `exitCode`).
+
+The advisory that follows:
+
+```
+Sandboxed command never started — the process died while its native libraries were loading.
+
+What was reported:
+  [exit code: -1073741502]        (0xC0000142 STATUS_DLL_INIT_FAILED)
+The call ran under sandbox mode `workspace-write`, where the harness starts every command through its
+restricted-token runner.
+
+0xC0000142 is STATUS_DLL_INIT_FAILED: ... this is BEFORE the program's entry point. ...
+Nothing in the code says "sandbox" by itself; what makes the sandbox a candidate is the mode above ...
+
+Two producers have been measured under a confining Windows mode. Check which one this is:
+  1. An MSYS2 / Git-Bash program ... (#7877)
+     If that is what could not start: write the same work as a PowerShell or `cmd` command instead
+  2. The packaged desktop application's sandbox runner ... (#7876)
+     This process is NOT an Electron binary (`process.versions.electron` is unset), so that producer does not apply here.
+
+Do not retry this call: the environment has not changed, and the identical call produces the identical code.
+
+Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of
+its own DLLs dies this way too, and the sandbox backend's own source records that a child started with
+a hidden console window does as well ... This is not a claim that the sandbox caused the failure.
+```
+
+**What it does not claim.** The code is a loader status, and the loader reports
+the same status for causes that have nothing to do with the sandbox (a missing
+DLL, a program's own initialization failure, the hidden-console child the
+backend's own source avoids `CREATE_NO_WINDOW` for). So the advisory diagnoses
+the **class** ("the process never reached its entry point") and enumerates the
+producers measured under a confining mode, each with the check that separates
+them — one of which the reader answers (what program failed to start) and one of
+which the plugin answers (is this host the packaged desktop binary). It never
+offers `danger-full-access` as a fix and never suggests a sandbox setting be
+relaxed.
+
 ## What it does with a recognized failure
 
-1. **One durable advisory per agent, per family.** An agent that hits both
+1. **One durable advisory per agent, per family.** An agent that hits two
    families is told about **both**, once each. The notice carries its own
    producer-owned `source.kind` (`sandbox-grant-advisor`) — not the retired
    `plugin` wrapper, which the current session format refuses — and a bounded
    one-line `summary` for the transcript row. The host log gets one matching
    `warn` line, so the fact survives outside the transcript too.
-2. **A disclosure when it withholds.** The PTY advisory is only sent when the
+2. **A disclosure when it withholds.** The PTY and native-init advisories are
+   only sent when the
    resolved mode actually confines. If the mode is `danger-full-access`, or
    cannot be resolved at all (no `sandboxPolicy` service mounted, no agent
    session, a resolver that throws), the failure is left exactly as it was
@@ -256,14 +357,18 @@ the advisory never names the dead directory.
    refused twice — while a session can always make progress by spending the
    budget it has.
 
-   **Why the blocking half does not extend to the PTY family** (it is
-   ACL-only by construction, in the parameter type): the ACL remedy is a command
+   **Why the blocking half does not extend to the two mode-gated families** (it
+   is ACL-only by construction, in the parameter type): the ACL remedy is a
+   command
    the user can run *while the session continues*, so refusing further identical
    calls cannot make the session unfinishable — spending the budget always lets
    the call through, and a repaired environment is discovered by exactly that.
-   The PTY remedy is a preset swap, which happens **between** sessions;
-   refusing calls there could only pad a session that is already unable to do
-   the thing being refused.
+   The PTY remedy is a preset swap, which happens **between** sessions, and the
+   native-init remedy is a launch fix on the user's side — whose one in-session
+   part, rewriting an MSYS2 command, the model does by calling a *different*
+   command, which has a different call key and is therefore never the call being
+   refused. Refusing calls in those families could only pad a session that is
+   already unable to do the thing being refused.
 
 ## Install
 
@@ -328,6 +433,15 @@ than one that stays silent.
 - **A successful command whose *output* contains the line is not a failure.**
   The gate is the result's error state, not the presence of the text — reading a
   log file that quotes the error must not trigger advice.
+- **Only `STATUS_DLL_INIT_FAILED` is classified, and only from the canonical
+  value.** `0xC0000409` is the Cygwin/MSYS2 runtime's deliberate fast-fail (a
+  different mechanism with a different story) and `0xC0000135` is a missing DLL
+  (a packaging problem, not a sandbox one); both are refused, as is exit `127`,
+  which upstream's runner-failure rule already owns. And because the code is
+  compared as a number in `ToolExecutionSuccess.value`, a command printing
+  `[exit code: -1073741502]`, or any value that is not the shipped shell
+  projection (`kind: 'foreground'`), is not this family — a line of text can
+  never be mistaken for a loader status.
 - **Only one advisory per agent, per family.** The environment is explained
   once; repeating it per failed command would be noise competing with the
   failure itself.
@@ -336,7 +450,9 @@ than one that stays silent.
 
 - **The Windows path itself cannot be witnessed on macOS**, where this plugin
   was built. What the test suite proves is the decision layer — classification
-  of both families, the once-per-agent-per-family rule, the sandbox-mode gate
+  of all three families (the third from the producer's own canonical value,
+  built by the suite with the reported `-1073741502` and the report's stderr
+  line), the once-per-agent-per-family rule, the sandbox-mode gate
   and its fail-closed behaviour, the fail-fast budget and its self-feeding
   guard, and the wiring to a real cordis `Context` and the real `ToolRuntime` —
   driven by fixtures that throw the producers' exact error shapes
@@ -345,7 +461,8 @@ than one that stays silent.
   does **not** prove that `icacls ... :(OI)(CI)F` fixes a given machine, nor that
   a given Windows host reproduces the PTY startup failure; those are the user's
   one-line experiment and the reporter's own control, and both advisories say
-  where they stop.
+  where they stop. The native-init family is the one that needs no Windows to be
+  faithful, because what it reads is a number inside a JSON value.
 - **It repairs nothing and elevates nothing.** If the directory really is
   Full-control for the caller, the remaining ACL hypothesis is
   `SeSecurityPrivilege` — i.e. the backend's documented prerequisite would be
@@ -365,13 +482,16 @@ than one that stays silent.
   outside the seam this plugin subscribes to. The report and its proposed fix
   stay with the maintainers; all this plugin can do is explain the provisioning
   failure that shares its root.
-- **The real fix is upstream, in both families.** For the ACL failure,
+- **The real fix is upstream, in all three families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
   a 52-minute detour into one line belongs at that site. For the PTY failure,
   the startup path should either report "this sandbox mode is incompatible with
-  the PTY backend" or fall back to a one-shot shell. This plugin is the stopgap
-  for both.
+  the PTY backend" or fall back to a one-shot shell. For the native-init death,
+  the runner should be launched with the environment its own execution needs
+  (`ELECTRON_RUN_AS_NODE=1` when `argv[0]` is an Electron binary — [`#7876`]'s
+  three candidate fixes) or refuse, in a checkable way, an MSYS2 program under a
+  restricted token. This plugin is the stopgap for all three.
 
 ## Compatibility
 
@@ -404,10 +524,15 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.4.0` re-ran all five lines above. A line whose probe fails is
+the plugin, so `0.6.0` re-ran all five lines above. A line whose probe fails is
 removed from the range rather than left claimed. The scratch tree's resolved
 versions are the ones to read back when a probe is quoted as evidence — the probe
 script pins them by exact version, and `--keep` leaves the tree in place to check.
+
+The mode lookup stays guarded through this version too: the native-init family
+needs the same resolved mode as the PTY family, and it takes it from the same
+`ctx.get('sandboxPolicy')` capability guard, so a composition without the service
+degrades to a disclosed silence rather than failing to load.
 
 ## Development
 
@@ -425,8 +550,9 @@ refuses a call that would have worked, is worse than one that stays silent.
 `test:inject` exists because an arm nobody has seen fail proves nothing. It
 mutates the decision layer one defect at a time — the mode gate removed, the
 PTY message matched as a substring, the preset remedy pointed back at the dead
-legacy directory, the two families collapsed into one bookkeeping slot, the
-advisory delivered per call instead of per agent — and requires that specific
+legacy directory, two families collapsed into one bookkeeping slot, the advisory
+delivered per call instead of per agent, the loader-status read moved onto the
+error path, the family keyed on the rendered text — and requires that specific
 arms fail. It reports `SILENT ARMS: none` when every arm bites, restores the
 source in a `finally`, and prints `EQUIVALENT` (with the reason) for a mutation
 the current runtime cannot distinguish rather than counting it as a pass.
@@ -440,7 +566,11 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
 [discussion #7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [discussion #7816]: https://github.com/deepseek-ai/deepseek-harness/discussions/7816
+[discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
+[discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
+[discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
 [#7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
 [#7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
 [#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
-[discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
+[#7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
+[#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
