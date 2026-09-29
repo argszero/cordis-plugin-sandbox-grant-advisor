@@ -96,7 +96,7 @@ import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232'
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
@@ -318,6 +318,8 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
   const where = href === undefined ? `tracked upstream (discussions ${ACL_DISCUSSIONS})` : `tracked upstream: ${href}`
   return [
     'Sandbox provisioning failed — no sandboxed command can run in this workspace until its ACL applies.',
+    'The failure belongs to the WORKSPACE, not to the command: under this mode a command that only reads',
+    'fails identically, so trying a different or more harmless command is not a retry that can succeed.',
     '',
     'What was reported:',
     `  ${failureLine(failure)}`,
@@ -342,6 +344,9 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     `  cmd:        icacls "${path}" /grant "%USERNAME%:(OI)(CI)(WO)"`,
     'WRITE_OWNER is exactly the right the prerequisite names, so this grants nothing the harness did not ask for,',
     'and (OI)(CI) makes the ACE inheritable, so one command reaches the workspace\'s existing subdirectories.',
+    'The grant is still scoped to THIS directory and its children: another workspace root on the same volume is',
+    'a sibling rather than a child, so it needs the same line once — which is why a second workspace fails on a',
+    'machine where the first one was already repaired.',
     'Full control works just as well — the same line with `F` in place of `(WO)`:',
     `  icacls "${path}" /grant "$env:USERNAME:(OI)(CI)F"`,
     'Why `(WO)` is the whole of what is missing there: an owner holds READ_CONTROL and WRITE_DAC implicitly,',

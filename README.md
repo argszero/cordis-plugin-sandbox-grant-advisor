@@ -35,12 +35,24 @@ stuck.
 
 ### 1. Workspace provisioning — the Windows ACL failure (`acl-provisioning`)
 
-Six reports describe this exact line: [discussion #7538], [discussion #7622],
-[discussion #7646], [discussion #7720], [discussion #7750], [discussion #7735]
-(the last two on data-volume workspaces, where *no* ACE names the caller at all —
-the inherited `Authenticated Users: Modify` is the whole of their access). In each
-one every sandboxed command fails the same way, before it runs, and the error names
-neither the missing right nor a remedy.
+Seven reports describe this exact line: [discussion #7538], [discussion #7622],
+[discussion #7646], [discussion #7720], [discussion #7750], [discussion #7735] and
+[discussion #8232] (the last three on data-volume workspaces, where *no* ACE names
+the caller at all — the inherited `Authenticated Users: Modify` is the whole of
+their access). In each one every sandboxed command fails the same way, before it
+runs, and the error names neither the missing right nor a remedy.
+
+`#8232` contributes two facts about the *shape* of the failure rather than its
+cause, and both are in the advisory now. One is that the failure belongs to the
+**workspace, not the command**: there a `Get-Date` failed exactly like anything
+that writes, because the grant is materialized before the command runs at all. The
+other is the **scope of the repair**: the `(OI)(CI)(WO)` line covers *this*
+directory and its children, so a second workspace root on the same volume is a
+sibling rather than a child and needs the same line once more — which is why that
+reporter saw a second workspace fail on a machine whose first one was already
+repaired. The report also reaches the same root cause on its own (the merged write
+wanting `WRITE_OWNER`, which owner-implicit rights do not carry), matching the
+backend's documented prerequisite.
 
 `#7720` is worth reading for where the failure lands: the grant is materialized
 at sandbox **initialization**, so this is not one refused operation but *every*
@@ -93,6 +105,13 @@ Two consequences follow from that one line:
    what confines deletes to the workspace, and reverting it reintroduces the
    escape it closed. `#7750` asks for exactly this and explains why it is a
    usability regression traded for a security fix.
+5. **The repair is per-directory, and the report is what established that.** `#8232`
+   applied the `(WO)` line, watched the workspace start working, and then hit the
+   same error on a *second* workspace root on the same volume. `(OI)(CI)` carries
+   the ACE into *children* of the directory that received it and nowhere else, so a
+   sibling root is untouched by it. One line per workspace root is therefore the
+   correct shape of the remedy, not one line per machine — and the advisory says so,
+   because the natural reading of "it worked" is "it is fixed".
 
 The grant is materialized lazily, on the first confined call, and **nothing is
 cached when it throws** — so the same failure repeats per command (850 calls
@@ -656,6 +675,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
 [discussion #7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [discussion #7816]: https://github.com/deepseek-ai/deepseek-harness/discussions/7816
+[discussion #8232]: https://github.com/deepseek-ai/deepseek-harness/discussions/8232
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
 [discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
@@ -665,6 +685,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [#7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
+[#8232]: https://github.com/deepseek-ai/deepseek-harness/discussions/8232
 [#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193
 [#8174]: https://github.com/deepseek-ai/deepseek-harness/discussions/8174
 [#8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208

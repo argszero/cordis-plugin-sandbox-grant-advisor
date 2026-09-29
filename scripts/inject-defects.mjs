@@ -194,6 +194,18 @@ const MUTATIONS = [
     edits: [["    'One arm of this family was applied, measured, and rejected — named so a reader does not reach for it:',", "    'One arm of this family was applied and measured, and it is offered here:',"]],
   },
   {
+    name: 'the grant reads as machine-wide, so a reader thinks one command repairs every workspace',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'The grant is still scoped to THIS directory and its children: another workspace root on the same volume is',", "    'The grant covers the whole volume, so no second workspace root needs the line again:',"]],
+  },
+  {
+    name: 'the advisory sends the reader to retry with a harmless command',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'The failure belongs to the WORKSPACE, not to the command: under this mode a command that only reads',", "    'A command that only reads should still work, so start with one of those:',"]],
+  },
+  {
     name: 'the advisory asserts one producer instead of enumerating the measured two',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',

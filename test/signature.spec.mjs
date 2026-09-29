@@ -126,6 +126,13 @@ test('the remedy is the right the prerequisite actually names, and the broad for
   assert.match(text, /exactly the right the prerequisite names/)
   // ...and the inheritable form, so one command reaches existing subdirectories.
   assert.match(text, /\(OI\)\(CI\) makes the ACE inheritable/)
+  // What the inheritable form does NOT cover, which a field report (#8232) had to
+  // find out for itself: the ACE is scoped to this directory and its children, so
+  // another workspace root on the same volume is a sibling and needs the line again.
+  assert.match(text, /scoped to THIS directory and its children/)
+  assert.match(text, /another workspace root on the same volume is/)
+  assert.match(text, /a sibling rather than a child/)
+  assert.match(text, /a second workspace fails on a\s+machine where the first one was already repaired/)
   // Full control still works, and saying so is not a second recipe but the same
   // remedy with more than it needs — hence the derivation, not a second syntax pair.
   assert.match(text, /Full control works just as well — the same line with `F` in place of `\(WO\)`/)
@@ -141,6 +148,25 @@ test('the remedy is the right the prerequisite actually names, and the broad for
     text.indexOf('(WO)') < text.indexOf('(OI)(CI)F'),
     'the narrow grant must be offered before the broad one, not after it',
   )
+})
+
+test('the advisory says the failure is the workspace\'s, not the command\'s', () => {
+  // #8232's severity point: the failure lands at workspace provisioning, so every
+  // command in the session fails — including one that would only read. A reader who
+  // believes otherwise retries with something "harmless" and learns nothing, which
+  // is the loop this plugin exists to cut short.
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure, { tool: 'pwsh' })
+  assert.match(text, /The failure belongs to the WORKSPACE, not to the command/)
+  assert.match(text, /a command that only reads\s+fails identically/)
+  assert.match(text, /is not a retry that can succeed/)
+  // It is stated for the ACL family only: the other two families have their own
+  // retry instructions, and none of them may borrow this one.
+  const native = advisoryText(classifyNativeInitDeath(foreground(NATIVE_DEATH)), { mode: 'workspace-write' })
+  assert.doesNotMatch(native, /The failure belongs to the WORKSPACE/)
+  const pty = advisoryText(classifyPtyStartupFailure(PTY_EXIT), { mode: 'workspace-write' })
+  assert.doesNotMatch(pty, /The failure belongs to the WORKSPACE/)
 })
 
 test('both environments that share this signature are named, because the text cannot tell them apart', () => {
