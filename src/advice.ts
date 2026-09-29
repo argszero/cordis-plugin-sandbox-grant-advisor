@@ -58,12 +58,21 @@
  *   is guess which producer this is: the code alone cannot say, and the two
  *   checks it hands over are facts the reader holds (what program they ran;
  *   whether this is the packaged desktop app, which the plugin reports rather
- *   than assumes). That Electron host is itself **two measurements**, not one —
- *   a runner that never started at all, and a runner that did start and whose
- *   child cannot survive the restricted token derived from an Electron process
- *   image — and the advisory names both instead of asserting the one it shipped
- *   first, because a session cannot tell them apart and a confidently wrong
- *   cause is worse than two named ones with one shared remedy.
+ *   than assumes). That Electron host was shipped as **two measurements**; since
+ *   0.8.0 it is **one mechanism, named**: the runner must own a *console* for the
+ *   confined child to inherit, and when it owns none the child's own console
+ *   request is denied under the restricted token (`#8208` traced it to
+ *   `conhost.exe` created by the restricted child, exiting `STATUS_ACCESS_DENIED`).
+ *   The two measured console-less shapes are a GUI-subsystem host image (the
+ *   packaged desktop) and a `DETACHED_PROCESS` runner under a real `node.exe`
+ *   host — the second reproducible on any machine, which is what makes it the
+ *   check worth handing over. The shape 0.7.x led with, "the runner never started
+ *   at all", is **withdrawn**: the desktop's own host child is started with
+ *   `ELECTRON_RUN_AS_NODE=1` (`apps/desktop/src/host-process.ts` ->
+ *   `desktopNodeEnvironment()`), so nothing on the runner path fails to start for
+ *   want of that variable. A withdrawn cause earns its sentence because this
+ *   advisory shipped it twice; a confidently wrong cause is worse than two named
+ *   ones with one shared remedy.
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -93,7 +102,7 @@ export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / 
 export const PTY_DISCUSSIONS = '#7638'
 
 /** The upstream threads the native-init-death advisory is a stopgap for. */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208'
 
 /** The documented prerequisite, quoted from the backend's README. */
 export const PREREQUISITE = 'granted directories must be caller-owned and grant `WRITE_OWNER`'
@@ -413,46 +422,76 @@ function nativeInitAdvisory(
     '     continue — do not retry the MSYS2 program.',
     '  2. The packaged desktop application\'s sandbox runner. `dsh-sandbox-local` starts the runner as',
     '     `[process.execPath, runner.js]`, and in the packaged build `process.execPath` is the Electron',
-    '     executable. Two measurements of that host exist and from inside a session they are',
-    '     indistinguishable, so both are named here rather than one asserted:',
-    '     (a) the runner does not start at all: the Electron binary begins as an *application* unless the',
-    '         child\'s environment carries `ELECTRON_RUN_AS_NODE=1`, so nothing on the runner path ran (#7876);',
-    '     (b) the runner does start — the desktop launcher sets exactly that variable — and the command still',
-    '         dies, because the restricted token is derived from the Electron process image and the child does',
-    '         not survive being started under it (#8193).',
-    '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',
-    '     the ACL runner appear among its processes while the command runs?); from inside the session they are',
-    '     one finding with one remedy, so nothing here waits on telling them apart.',
+    '     executable. The mechanism behind this one is the runner\'s CONSOLE, not its token: the confined',
+    '     child inherits a console from the runner, and a runner that owns none leaves the child to ask for one',
+    '     of its own — which a restricted token is not allowed to have. #8208 captured the sequence: `conhost.exe`',
+    '     is created BY the restricted child, exits `0xC0000022 STATUS_ACCESS_DENIED`, and the child then dies',
+    '     with the code above. Both console-less configurations are measured:',
+    '     (a) the host binary is a GUI-subsystem program, which never owns a console — the packaged desktop,',
+    '         where every confined command dies this way (#8193);',
+    '     (b) the host binary is a real console-subsystem `node.exe` and the runner was still spawned without a',
+    '         console, because `DETACHED_PROCESS` was set: `spawnSync(node, [runner, …], { detached: true })`',
+    '         returns `0xC0000142` while the same call without that flag returns `0` (#8208). That arm needs no',
+    '         desktop and no particular machine, so it is the check worth running here.',
+    '     What is NOT the discriminator: the token. #8208 compared `whoami /groups` and `/priv` from children of',
+    '     a working node host and of the failing Electron host — identical, down to the group count and session —',
+    '     and a low-integrity `cmd.exe` runs fine on that machine, so neither the token nor low integrity alone',
+    '     explains this.',
     ...(onElectron
       ? [
-          '     This process IS an Electron binary (`process.versions.electron` is set), so that producer applies here.',
-          '     The way out is a real node host, not a wider mode: the packaged desktop ships one at',
-          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the unpacked',
-          '     `node apps/cli/lib/bin.js web` host works for the same reason — the same confined `pwsh`/`cmd` calls',
-          '     start there (#8193 measured exit 81/82). The command starts there in either shape, and that — the',
-          '     host, not the flags — is the discriminator. `danger-full-access` only CONFIRMS the diagnosis: on this',
-          '     platform it silently removes the sandbox from every shell call. Do not unset `ELECTRON_RUN_AS_NODE`',
-          '     instead either — the desktop runner IS that Electron binary, so without it `runner.js` cannot',
-          '     execute at all (#8193 records this interaction with #8174).',
+          '     This process IS an Electron binary (`process.versions.electron` is set), so a GUI-subsystem host',
+          '     applies here. The way out is a real node host — the packaged desktop ships one at',
+          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the same runtime installed',
+          '     for workspace dependencies lands at',
+          '     `%USERPROFILE%\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\node\\bin\\node.exe` (present',
+          '     once `load_workspace_dependencies` has run) — and the unpacked `node apps/cli/lib/bin.js web` host',
+          '     works for the same reason: the same confined `pwsh`/`cmd` calls start there (#8193 measured exit',
+          '     81/82; #8208 measured exit 0 with the command\'s own stdout intact, with and without `windowsHide`).',
+          '     ONE CONDITION RIDES WITH THAT: the runner must be spawned WITH a console, i.e. not with',
+          '     `DETACHED_PROCESS`. A real host alone is not enough if that flag is set (#8208) — the host binary is',
+          '     what supplies the console, and the spawn flag is what can take it away again.',
+          '     If no real node host can be put in front of the runner, the same effect fits inside it: `AllocConsole`',
+          '     before the restricted spawn, with the three standard handles restored afterwards, in',
+          '     `dsh-win32-process`\'s `createRestrictedProcess` — the funnel every restricted child goes through.',
+          '     #8208 measured `cmd /c exit` and `pwsh -c "Write-Output …"` both reaching 0 with stdout intact under',
+          '     that change, and as a no-op on a runner that already owns a console; it costs a `user32` binding and',
+          '     one console host per runner process.',
+          '     `danger-full-access` only CONFIRMS the diagnosis: on this platform it silently removes the sandbox',
+          '     from every shell call. Do not unset `ELECTRON_RUN_AS_NODE` instead either — the desktop runner IS',
+          '     that Electron binary, so dropping the variable would take `runner.js` down with it (#8193 records',
+          '     this interaction with #8174).',
         ]
       : [
           '     This process is NOT an Electron binary (`process.versions.electron` is unset), so the runner is a real',
-          '     Node binary here and that producer cannot be the cause. If the program was not an MSYS2 one either,',
-          '     this failure is outside both measured producers: stop and hand it to the user.',
+          '     Node binary here and a GUI-subsystem host cannot be the cause. One measured shape is still open: a',
+          '     runner that owns no console because it was spawned with `DETACHED_PROCESS` fails exactly this way on a',
+          '     real node host too (#8208) — that is a property of how this host was launched, not of the build. If the',
+          '     program was not an MSYS2 one either, and the runner was not spawned detached, this failure is outside',
+          '     both measured producers: stop and hand it to the user.',
         ]),
     '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',
     'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
     '',
     'Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of',
-    'its own DLLs dies this way too, and the backend\'s own source records that a child created with a hidden',
-    'console window can as well (`CREATE_NO_WINDOW` can fail restricted-token DLL initialization). #8193',
-    'refines that recording rather than repeating it: `CREATE_NO_WINDOW` is not among the flags actually passed',
-    '(they are `CREATE_SUSPENDED`, and `CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the unrestricted',
-    'path), and the same flags succeed under a real-node host — so the flag is a necessary ingredient and the',
-    'host process image is what turns it fatal. This is not a claim that the sandbox caused the failure — the',
-    'code cannot say that. What is claimed is narrower and checkable: the process never reached its entry',
-    'point, and under this mode these two producers are known.',
+    'its own DLLs dies this way too, and the backend\'s own source records the console case as an inherent',
+    'limit of the backend (`CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE` children die with `STATUS_DLL_INIT_FAILED`',
+    'under the restriction). #8208 explains that limit instead of repeating it, and the explanation is what the',
+    'two shapes above share: in a restricted token a console can be INHERITED but not CREATED. The creation',
+    'flags actually passed are three sets and none of them is `CREATE_NO_WINDOW` — `0` on the piped path,',
+    '`CREATE_SUSPENDED` on the inherited-job path, and `CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the',
+    'ordinary path. Those same flags are fatal under a console-less runner and harmless under one that owns a',
+    'console, so it is the console and not the flag list that decides.',
+    '',
+    'One arm of this family was applied, measured, and rejected — named so a reader does not reach for it:',
+    'putting `DETACHED_PROCESS` on the RESTRICTED CHILD removes its console request and does stop the crash,',
+    'but `pwsh` then exits 0 with zero bytes on stdout AND stderr, while `cmd.exe` keeps its output (#8208).',
+    'That trades a loud failure for a silent one on the interpreter most likely to be used, so the runner-side',
+    'remedies above — which keep the output — are the ones to take.',
+    '',
+    'This is not a claim that the sandbox caused the failure — the code cannot say that. What is claimed is',
+    'narrower and checkable: the process never reached its entry point, and under this mode these producers are',
+    'known.',
     '',
     'This is a stopgap, ' + where + '. What it is NOT: this plugin neither changes an environment nor',
     'widens the sandbox — the checks above are yours to make, and `danger-full-access` is not offered as a fix.',

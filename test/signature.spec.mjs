@@ -515,18 +515,31 @@ test('the native-init advisory names the class, both producers, and their checks
   assert.match(flat, /couldn't create signal pipe, Win32 error 5/)
   assert.match(flat, /#7877/)
   assert.match(flat, /write the same work as a PowerShell or `cmd` command instead/)
-  // Producer 2: the packaged desktop runner, with the mechanism and the report's
-  // discriminator.
-  assert.match(flat, /ELECTRON_RUN_AS_NODE=1/)
+  // Producer 2: the packaged desktop runner, with the mechanism #8208 measured
+  // and the two console-less shapes it has been observed in.
   assert.match(flat, /\[process\.execPath, runner\.js\]/)
-  assert.match(flat, /#7876/)
-  // And the second measurement of that same host, which the text must name
-  // rather than assert away: a runner that DID start (#8193).
-  assert.match(flat, /Two measurements of that host exist/)
-  assert.match(flat, /the runner does not start at all/)
-  assert.match(flat, /the runner does start/)
-  assert.match(flat, /the restricted token is derived from the Electron process image/)
-  assert.match(flat, /not survive being started under it \(#8193\)/)
+  assert.match(flat, /#8193/)
+  assert.match(flat, /the runner's CONSOLE, not its token/, 'the mechanism is named, not the token story')
+  assert.match(flat, /conhost\.exe` is created BY the restricted child/)
+  assert.match(flat, /0xC0000022 STATUS_ACCESS_DENIED/)
+  assert.match(flat, /#8208/)
+  assert.match(flat, /Both console-less configurations are measured/)
+  assert.match(flat, /the host binary is a GUI-subsystem program/)
+  // The machine-independent shape, which is why the text can hand the reader a
+  // check that needs no desktop and no particular machine.
+  assert.match(flat, /spawnSync\(node, \[runner, …\], \{ detached: true \}\)/)
+  assert.match(flat, /needs no desktop and no particular machine/)
+  // The discriminator 0.7.x named is refuted by measurement, and the text says so
+  // rather than quietly dropping it.
+  assert.match(flat, /What is NOT the discriminator: the token/)
+  assert.match(flat, /a low-integrity `cmd\.exe` runs fine on that machine/)
+  // And the withdrawn cause: "the runner does not start at all" cannot arise in
+  // this build, because the desktop starts its own host child with exactly the
+  // variable that sentence said was missing (`apps/desktop/src/host-process.ts`
+  // -> `desktopNodeEnvironment()`).
+  assert.doesNotMatch(flat, /nothing on the runner path ran/)
+  assert.doesNotMatch(flat, /the runner does not start at all/)
+  assert.doesNotMatch(flat, /ELECTRON_RUN_AS_NODE=1/)
   assert.doesNotMatch(flat, /the runner never ran/)
   // The measured fact about THIS process, not an assumption about it: this arm
   // runs off the packaged desktop, so the producer that needs Electron is ruled
@@ -538,7 +551,7 @@ test('the native-init advisory names the class, both producers, and their checks
   assert.match(flat, /Do not retry this call/)
   assert.match(flat, /Convert the work only in case 1; otherwise stop and hand it to the user/)
   assert.match(flat, /producers this list does not have/)
-  assert.match(flat, /hidden console window/)
+  assert.match(flat, /records the console case as an inherent limit of the backend/)
   // What it must NOT say: the other families' stories, or an offer to widen the
   // sandbox as a remedy.
   assert.doesNotMatch(text, /icacls|WRITE_OWNER|SeSecurityPrivilege/)
@@ -580,53 +593,64 @@ test('the Electron fact is reported, so the same code reads differently on the t
   assert.match(advisoryText(failure, { mode: 'workspace-write' }), /This process is NOT an Electron binary/)
 })
 
-test('the Electron host names both of its measurements instead of asserting the one it shipped first', () => {
-  // The defect this pins against: `0.6.0` said that the Electron executable
-  // "starts as an *application* unless the child's environment carries
-  // `ELECTRON_RUN_AS_NODE=1` — so the runner never runs", and then told the
-  // Electron reader that a real-node host working out means "the runner never
-  // ran". `#8193` measures the desktop launcher SETTING that variable: the
-  // runner runs, and the child still dies because the restricted token is
-  // derived from the Electron process image. Every reader in that shape was
-  // given a cause that was false, attached to a check that confirms the host
-  // and therefore seemed to confirm the mechanism.
+test('the Electron host names the console mechanism, both of its shapes, and the condition on the remedy', () => {
+  // The defect this pins against, in the shape it shipped: `0.6.0` asserted one
+  // cause ("starts as an *application* unless `ELECTRON_RUN_AS_NODE=1` — so the
+  // runner never runs"), `0.7.x` replaced it with two named measurements that
+  // still explained the failure by the restricted token derived from an Electron
+  // image. `#8208` measures the token to be identical between a working and a
+  // failing host, and traces the failure to the runner's console. What has to
+  // survive here is the mechanism, the two shapes it takes, and the *condition*
+  // the remedy carries — because a real node host alone is not the fix either.
   const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH))
   assert.ok(failure)
   const flat = advisoryText(failure, { mode: 'workspace-write', electronHost: false }).replace(/\s+/g, ' ')
-  assert.match(flat, /Two measurements of that host exist and from inside a session they are indistinguishable/)
-  assert.match(flat, /both are named here rather than one asserted/)
-  assert.match(flat, /\(a\) the runner does not start at all/)
-  assert.match(flat, /nothing on the runner path ran \(#7876\)/)
-  assert.match(flat, /\(b\) the runner does start/)
-  assert.match(flat, /not survive being started under it \(#8193\)/, 'the second measurement keeps its own thread')
-  // The reader keeps a check, and it is one they can actually run — a process
-  // tree and an environment variable — rather than a mechanism the session has
-  // to settle before it can act.
-  assert.match(flat, /is `ELECTRON_RUN_AS_NODE` set for that host/)
-  assert.match(flat, /does the ACL runner appear among its processes while the command runs/)
-  assert.match(flat, /one finding with one remedy, so nothing here waits on telling them apart/)
-  // The conclusion the Electron branch draws is the host, not the flag — and it
-  // is the same conclusion whichever measurement is the live one.
+  assert.match(flat, /The mechanism behind this one is the runner's CONSOLE, not its token/)
+  assert.match(flat, /a console can be INHERITED but not CREATED/)
+  assert.match(flat, /Both console-less configurations are measured/)
+  // The non-Electron branch keeps the shape that is still open to it, and stops
+  // short of naming a cause it cannot see.
+  assert.match(flat, /One measured shape is still open/)
+  assert.match(flat, /fails exactly this way on a real node host too \(#8208\)/)
+  assert.match(flat, /outside both measured producers/)
   const onElectron = advisoryText(failure, { mode: 'workspace-write', electronHost: true }).replace(/\s+/g, ' ')
-  assert.match(onElectron, /The command starts there in either shape/)
-  assert.match(onElectron, /that — the host, not the flags — is the discriminator/)
+  assert.match(onElectron, /ONE CONDITION RIDES WITH THAT/)
+  assert.match(onElectron, /the runner must be spawned WITH a console/)
+  assert.match(onElectron, /not with `DETACHED_PROCESS`/)
+  assert.match(onElectron, /the host binary is what supplies the console/)
+  assert.match(onElectron, /the spawn flag is what can take it away again/)
+  // The host-independent fallback, named as what it is: a change inside the one
+  // funnel every restricted child goes through, with its own measured effect.
+  assert.match(onElectron, /AllocConsole/)
+  assert.match(onElectron, /createRestrictedProcess/)
+  assert.match(onElectron, /a no-op on a runner that already owns a console/)
   assert.doesNotMatch(onElectron, /the runner never ran/)
   assert.doesNotMatch(onElectron, /the runner never runs/)
-  // The remedy is the host, so the reader is warned off the one "fix" that would
-  // break the desktop host entirely: `ELECTRON_RUN_AS_NODE` is what makes the
-  // Electron binary able to run `runner.js` at all, which is the interaction
-  // `#8193` records with `#8174`.
+  assert.doesNotMatch(onElectron, /ELECTRON_RUN_AS_NODE=1/)
+  // The remedy is the host, but the wrapper it disclaims is the other variable:
+  // `ELECTRON_RUN_AS_NODE` is what lets that Electron binary run `runner.js` at
+  // all, which is the interaction `#8193` records with `#8174`.
   assert.match(onElectron, /Do not unset `ELECTRON_RUN_AS_NODE`/)
-  assert.match(onElectron, /without it `runner\.js` cannot execute at all/)
+  assert.match(onElectron, /would take `runner\.js` down with it/)
   assert.match(onElectron, /#8193 records this interaction with #8174/)
-  // The honest boundary repeats the backend's own recording of the console-window
-  // limitation and then refines it, because `#8193` measured that the flags in use
-  // are not the one that recording names.
+  // The honest boundary repeats the backend's own recording of the console
+  // limitation and then *explains* it, with all three flag sets that are actually
+  // passed — `0` on the piped path is the one 0.7.x left out, and it is the path
+  // a shell call takes.
   const boundary = advisoryText(failure, { mode: 'workspace-write', electronHost: false }).replace(/\s+/g, ' ')
-  assert.match(boundary, /`CREATE_NO_WINDOW` is not among the flags actually passed/)
-  assert.match(boundary, /`CREATE_SUSPENDED`/)
-  assert.match(boundary, /necessary ingredient and the host process image is what turns it fatal/)
+  assert.match(boundary, /three sets and none of them is `CREATE_NO_WINDOW`/)
+  assert.match(boundary, /`0` on the piped path/)
+  assert.match(boundary, /`CREATE_SUSPENDED` on the inherited-job path/)
+  assert.match(boundary, /`CREATE_SUSPENDED \| CREATE_UNICODE_ENVIRONMENT` on the ordinary path/)
+  assert.match(boundary, /it is the console and not the flag list that decides/)
+  assert.doesNotMatch(boundary, /necessary ingredient/)
   assert.doesNotMatch(boundary, /which is why that backend avoids `CREATE_NO_WINDOW`/)
+  // The rejected arm, with both halves of its measurement: it stops the crash and
+  // silently discards the output of the interpreter most likely to be used.
+  assert.match(boundary, /applied, measured, and rejected/)
+  assert.match(boundary, /on the RESTRICTED CHILD/)
+  assert.match(boundary, /zero bytes on stdout AND stderr/)
+  assert.match(boundary, /`cmd\.exe` keeps its output/)
 })
 
 test('the native-init advisory refuses to be built without the mode it explains', () => {

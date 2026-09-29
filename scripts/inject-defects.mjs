@@ -145,27 +145,6 @@ const MUTATIONS = [
     edits: [['context.electronHost ?? electronHost()', 'true']],
   },
   {
-    // The defect that produced the version after 0.6.0: the desktop producer was
-    // asserted with the single shape that was measured first, so a reader holding
-    // the second measurement (#8193) was handed a cause that is false there.
-    name: 'the desktop producer asserts one measured shape again, reviving the sentence #8193 measures false',
-    file: 'src/advice.ts',
-    arms: 'signature.spec.mjs',
-    edits: [["    '     indistinguishable, so both are named here rather than one asserted:',", "    '     so the runner never runs:',"]],
-  },
-  {
-    name: 'the second measurement of the desktop host loses the thread that measured it',
-    file: 'src/advice.ts',
-    arms: 'signature.spec.mjs',
-    edits: [["    '         not survive being started under it (#8193).',", "    '         not survive being started under it.',"]],
-  },
-  {
-    name: 'the check that separates the two measurements is withheld from the reader',
-    file: 'src/advice.ts',
-    arms: 'signature.spec.mjs',
-    edits: [["    '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',", "    '     From inside the session the two are one finding:',"]],
-  },
-  {
     // The defect 0.7.1 exists to remove: the Electron reader was sent to a
     // widened mode, which on that platform removes the sandbox from every shell
     // call — and #8193 measured the real fix (a node host) while asking that it
@@ -173,22 +152,46 @@ const MUTATIONS = [
     name: 'the Electron remedy loses the host that fixes it and falls back to naming a wider mode',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the unpacked',", "          '     run the same command with `danger-full-access`, and the unpacked',"]],
+    edits: [["          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the same runtime installed',", "          '     run the same command with `danger-full-access`, and the same runtime installed',"]],
   },
   {
     name: 'the warning that unsetting ELECTRON_RUN_AS_NODE breaks the desktop runner is dropped',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
     edits: [[
-      "          '     platform it silently removes the sandbox from every shell call. Do not unset `ELECTRON_RUN_AS_NODE`',\n          '     instead either — the desktop runner IS that Electron binary, so without it `runner.js` cannot',\n          '     execute at all (#8193 records this interaction with #8174).',",
+      "          '     from every shell call. Do not unset `ELECTRON_RUN_AS_NODE` instead either — the desktop runner IS',\n          '     that Electron binary, so dropping the variable would take `runner.js` down with it (#8193 records',\n          '     this interaction with #8174).',",
       "          '     platform it silently removes the sandbox from every shell call.',",
     ]],
   },
   {
-    name: 'the honest boundary repeats the console-window limitation instead of refining it with the measured flags',
+    name: 'the honest boundary drops the piped path, so the flag list reads as two sets instead of three',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    'refines that recording rather than repeating it: `CREATE_NO_WINDOW` is not among the flags actually passed',", "    'repeats that recording: a child created with `CREATE_NO_WINDOW` dies this way,',"]],
+    edits: [["    'flags actually passed are three sets and none of them is `CREATE_NO_WINDOW` — `0` on the piped path,',", "    'flags actually passed are two sets and none of them is `CREATE_NO_WINDOW` —',"]],
+  },
+  {
+    name: 'the console mechanism is replaced by the refuted token story',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     executable. The mechanism behind this one is the runner\\'s CONSOLE, not its token: the confined',", "    '     executable. The restricted token is derived from the Electron process image, so the child dies.',"]],
+  },
+  {
+    name: 'the withdrawal is undone and the false "runner never started" cause is restored',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     (a) the host binary is a GUI-subsystem program, which never owns a console — the packaged desktop,',", "    '     (a) the runner does not start at all: the Electron binary begins as an application, so nothing on the',\n    '         runner path ran (#7876); the host binary is a GUI-subsystem program — the packaged desktop,',"]],
+  },
+  {
+    name: 'the condition on the remedy is dropped, so a real node host reads as sufficient',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     ONE CONDITION RIDES WITH THAT: the runner must be spawned WITH a console, i.e. not with',", "    '     A real node host is all that is needed:',"]],
+  },
+  {
+    name: 'the rejected DETACHED_PROCESS arm is presented as a remedy',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'One arm of this family was applied, measured, and rejected — named so a reader does not reach for it:',", "    'One arm of this family was applied and measured, and it is offered here:',"]],
   },
   {
     name: 'the advisory asserts one producer instead of enumerating the measured two',

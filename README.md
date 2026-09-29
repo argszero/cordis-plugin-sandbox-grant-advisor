@@ -236,8 +236,9 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Three reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
-app, measured twice) and [`#7877`] (MSYS2 / Git Bash). All are `0xC0000142`
+Four reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+app) and [`#7877`] (MSYS2 / Git Bash) — and [`#8208`], which found the mechanism
+the console cases share. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
@@ -259,65 +260,101 @@ Two producers have been measured under a confining mode:
    (`@deepseek-ai/dsh-base/cordis.patch.yml`), so the combination is likely
    never covered upstream. The **one conversion a model can make itself** is to
    write the same work as a PowerShell or `cmd` command.
-2. **The packaged desktop app's sandbox runner** ([`#7876`], [`#8193`]).
+2. **The packaged desktop app's sandbox runner** ([`#8193`], [`#8208`]).
    `dsh-sandbox-local` launches the runner as `[process.execPath, entry]`, and
-   in the packaged build `process.execPath` is the Electron executable. Two
-   measurements of that host exist and — from inside a session — they are
-   indistinguishable, so the advisory names **both** instead of asserting one:
-   **(a)** the runner does not start at all — the Electron binary begins as an
-   *application* unless the child's environment carries `ELECTRON_RUN_AS_NODE=1`,
-   so nothing on the runner path ran ([`#7876`]); **(b)** the runner *does*
-   start — the desktop launcher sets exactly that variable — and the command
-   still dies, because the restricted token is derived from the Electron process
-   image and the child does not survive being started under it ([`#8193`]). A
-   reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for
-   that host, and does the ACL runner appear among its processes while the
-   command runs?); from inside the session they are one finding with one remedy.
-   The unpacked node host (`node apps/cli/lib/bin.js web`) is unaffected. The
-   plugin reports whether *this* process is an Electron binary
-   (`process.versions.electron`) as a measured fact rather than assuming it,
-   because that is the check the discriminator turns on. **0.6.0 asserted shape
-   (a) alone** — "so the runner never runs" — and handed the Electron reader a
-   cause that [`#8193`] measures to be false; the single-cause sentence is gone,
-   and a test arm keeps it gone.
+   in the packaged build `process.execPath` is the Electron executable. **The
+   mechanism is the runner's console, not its token** ([`#8208`]): the confined
+   child inherits a console from the runner, and a runner that owns none leaves
+   the child to ask for one of its own — which a restricted token may not have.
+   The capture is three lines: `conhost.exe` is created *by the restricted child*,
+   exits `0xC0000022 STATUS_ACCESS_DENIED`, and the child then dies with
+   `0xC0000142`. Two console-less configurations are measured, and they share that
+   mechanism: **(a)** the host binary is a GUI-subsystem program, which never owns
+   a console — the packaged desktop, where every confined command dies this way
+   ([`#8193`]); **(b)** the host binary is a real console-subsystem `node.exe` and
+   the runner was still spawned without a console, because `DETACHED_PROCESS` was
+   set — `spawnSync(node, [runner, …], { detached: true })` returns `0xC0000142`
+   where the identical call without that flag returns `0` ([`#8208`]). Shape (b) is
+   the one worth handing over, because it needs no desktop and no particular
+   machine. **What is *not* the discriminator is the token**: [`#8208`] compared
+   `whoami /groups` and `/priv` from children of a working node host and of the
+   failing Electron host and found them identical, and a low-integrity `cmd.exe`
+   runs fine on that machine. The plugin reports whether *this* process is an
+   Electron binary (`process.versions.electron`) as a measured fact rather than
+   assuming it.
 
-   **The remedy is the host, and 0.7.1 says so in that order.** [`#8193`] did not
-   only split the producer — it measured the way out: hosted on the desktop's own
-   bundled standalone node
+   **`0.7.x` named two shapes and explained them with the wrong mechanism, and
+   `0.8.0` withdraws one of the shapes outright.** The withdrawn shape is "the
+   runner does not start at all, because `ELECTRON_RUN_AS_NODE=1` is missing": the
+   desktop sets that variable on its own host child
+   (`apps/desktop/src/host-process.ts` → `desktopNodeEnvironment()`,
+   `apps/desktop/src/node-environment.ts:15`), so nothing on the runner path can
+   fail to start for want of it — and [`#8208`] measured the variable present in
+   *both* hosts, including the one that works. The token story goes with it, for
+   the same measurement. A cause the advisory shipped twice earns its sentence
+   when it is retracted, and test arms keep both retractions in place.
+
+   **The remedy is a real node host — with one condition riding on it.** [`#8193`]
+   measured the way out: hosted on the desktop's own bundled standalone node
    (`resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, v24.21.0)
    the *same* confined `pwsh.exe` / `cmd.exe` spawns succeed (exit 81 / 82), with
    workspace, temp directory, mode, SIDs, target and runner `sha256` all held
-   constant. The advisory now leads the Electron branch with that, and demotes
-   `danger-full-access` to what it actually is — a way to **confirm** the
-   diagnosis, not a fix, and on this platform one that silently removes the
-   sandbox from every shell call. The reporter's own reason is the one the plugin
-   repeats: *"the practical effect is that Windows Desktop users must escalate to
-   full access for all shell work, which silently removes the sandbox on that
-   platform"*, and they asked explicitly that this not be "fixed" with
-   `--disable-sandbox` / `--disable-gpu-sandbox` — those disable Chromium's
-   renderer sandbox, a different layer from the DSH file policy. The advisory also
-   warns off the opposite-looking move: unsetting `ELECTRON_RUN_AS_NODE` does not
-   help, because the desktop's runner **is** that Electron binary and without the
-   variable it cannot execute `runner.js` at all — the interaction [`#8193`]
-   records with [`#8174`], where a fix that tombstones the variable in the shared
-   child environment would take the ACL runner down with it, so the two changes
-   have to land together.
+   constant. [`#8208`] reproduced it (exit `0`, the command's own stdout intact)
+   on the same runtime installed for workspace dependencies
+   (`%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe`,
+   present once `load_workspace_dependencies` has run) and with `windowsHide` both
+   set and unset. **The condition is that the runner must be spawned *with* a
+   console** — not with `DETACHED_PROCESS` — because a real host alone is not
+   enough when that flag is set ([`#8208`]): the host binary supplies the console
+   and the spawn flag is what can take it away again. Where no real host can be
+   put in front of the runner, the same effect fits inside it: `AllocConsole`
+   before the restricted spawn, with the three standard handles restored
+   afterwards, in `dsh-win32-process`'s `createRestrictedProcess` — the funnel
+   every restricted child goes through. [`#8208`] measured `cmd /c exit` and
+   `pwsh -c "Write-Output …"` both reaching `0` with stdout intact under that
+   change, and as a no-op on a runner that already owns a console; it costs a
+   `user32` binding and one console host per runner process. `danger-full-access`
+   is demoted to what it actually is — a way to **confirm** the diagnosis, not a
+   fix, and on this platform one that silently removes the sandbox from every
+   shell call. The reporter's own reason is the one the plugin repeats: *"the
+   practical effect is that Windows Desktop users must escalate to full access for
+   all shell work, which silently removes the sandbox on that platform"*, and they
+   asked explicitly that this not be "fixed" with `--disable-sandbox` /
+   `--disable-gpu-sandbox` — those disable Chromium's renderer sandbox, a
+   different layer from the DSH file policy. The advisory also warns off the
+   opposite-looking move: unsetting `ELECTRON_RUN_AS_NODE` does not help, because
+   the desktop's runner **is** that Electron binary and dropping the variable
+   would take `runner.js` down with it — the interaction [`#8193`] records with
+   [`#8174`], where a fix that tombstones the variable in the shared child
+   environment would take the ACL runner down with it, so the two changes have to
+   land together.
 
    **What the flag vocabulary actually is.** The backend's own source records one
    inherent boundary: *"console isolation is unavailable — children share the host
    console (`CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE` children die with
    `STATUS_DLL_INIT_FAILED` under the restriction)"*
-   (`packages/sandbox/sandbox-windows-acl/src/index.ts`), echoed at
-   `packages/subprocess/win32-process/src/process.ts:454`. [`#8193`] refines that
-   recording instead of repeating it, and the refinement is worth keeping exact:
-   the restricted-token path spawns with **`CREATE_SUSPENDED` alone**
-   (`process.ts:537-545`) and the ordinary current-token path with
-   **`CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT`** (`process.ts:567`, i.e.
-   `0x404`); `CREATE_NO_WINDOW` (`0x08000000`) is **not a constant anywhere in
-   that source** — only those two comments name it at all. So the flags in use are
-   a necessary-but-insufficient ingredient: the same flags that are fatal under an
-   Electron host succeed under a real-node host, and the host process image is
-   what turns them fatal.
+   (`packages/sandbox/sandbox-windows-acl/README.md:119`), echoed at
+   `packages/subprocess/win32-process/src/process.ts:454`. [`#8208`] **explains**
+   that recording instead of repeating it, and the explanation is the invariant
+   the two shapes share: **in a restricted token a console can be inherited but
+   not created.** The creation flags actually passed are three sets and none of
+   them is `CREATE_NO_WINDOW` — `0` on the piped path (`process.ts:243`, the path a
+   shell call takes), `CREATE_SUSPENDED` on the inherited-job path
+   (`process.ts:542`) and `CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the
+   ordinary path (`process.ts:567`, i.e. `0x404`); `CREATE_NO_WINDOW`
+   (`0x08000000`) is **not a constant anywhere in that source**. Those flags are
+   fatal under a console-less runner and harmless under one that owns a console —
+   so it is the console, not the flag list, that decides. `0.7.x` wrote the
+   two-set version of that list and called the flags "a necessary ingredient ...
+   the host process image is what turns it fatal"; both halves were wrong, and
+   `0.8.0` replaces them.
+
+   **One arm was applied, measured, and rejected.** Putting `DETACHED_PROCESS` on
+   the *restricted child* removes its console request and does stop the crash —
+   but `pwsh` then exits `0` with **zero bytes on stdout and stderr**, while
+   `cmd.exe` keeps its output ([`#8208`]). That trades a loud failure for a silent
+   one on the interpreter most likely to be used, so the advisory names it as a
+   non-remedy instead of offering it; the runner-side remedies keep the output.
 
 **Why this family is read from a successful result.** The producer never marks
 it an error, and that is a fact about upstream rather than a choice here:
@@ -622,6 +659,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
 [discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
+[discussion #8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208
 [#7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
 [#7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
 [#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
@@ -629,3 +667,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
 [#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193
 [#8174]: https://github.com/deepseek-ai/deepseek-harness/discussions/8174
+[#8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208

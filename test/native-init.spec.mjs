@@ -246,6 +246,6 @@ test('a configured href replaces the thread line in this family as well', async 
   // because a reader who wants the measurements needs the thread, not the line.
   assert.doesNotMatch(body, /tracked upstream \(discussions/)
   assert.match(body, /\(#7877\)/)
-  assert.match(body, /\(#7876\)/)
   assert.match(body, /\(#8193\)/)
+  assert.match(body, /\(#8208\)/)
 })
