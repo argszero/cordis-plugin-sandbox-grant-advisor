@@ -35,12 +35,14 @@ stuck.
 
 ### 1. Workspace provisioning — the Windows ACL failure (`acl-provisioning`)
 
-Seven reports describe this exact line: [discussion #7538], [discussion #7622],
-[discussion #7646], [discussion #7720], [discussion #7750], [discussion #7735] and
-[discussion #8232] (the last three on data-volume workspaces, where *no* ACE names
-the caller at all — the inherited `Authenticated Users: Modify` is the whole of
-their access). In each one every sandboxed command fails the same way, before it
-runs, and the error names neither the missing right nor a remedy.
+Twelve reports describe this exact line: [discussion #7538], [discussion #7622],
+[discussion #7646], [discussion #7720], [discussion #7750], [discussion #7735],
+[discussion #7771], [discussion #7804], [discussion #7816], [discussion #8232],
+[discussion #8272] and [discussion #8275] (three of them — [#7750], [#7735],
+[#8232] — on data-volume workspaces, where *no* ACE names the caller at all: the
+inherited `Authenticated Users: Modify` is the whole of their access). In each one
+every sandboxed command fails the same way, before it runs, and the error names
+neither the missing right nor a remedy.
 
 `#8232` contributes two facts about the *shape* of the failure rather than its
 cause, and both are in the advisory now. One is that the failure belongs to the
@@ -53,6 +55,39 @@ reporter saw a second workspace fail on a machine whose first one was already
 repaired. The report also reaches the same root cause on its own (the merged write
 wanting `WRITE_OWNER`, which owner-implicit rights do not carry), matching the
 backend's documented prerequisite.
+
+`#8272` and `#8275` add neither a cause nor a remedy — both land on the same
+missing right — but each one closes a reading the diagnosis leaves open, and both
+are in the advisory since 0.9.0.
+
+`#8272` reached the same conclusion by a **better probe than the one above**: it
+set a Low integrity level on a directory it owned, unelevated
+(`icacls <dir> /setintegritylevel "(OI)(CI)Low"`), and was refused. That isolates
+the label half of the merged call, which is the half that needs `WRITE_OWNER`, and
+it does so without asking anyone to interpret a merged failure. It is quoted here
+as evidence and deliberately **not** offered as a check: where the caller holds Full
+control the same command *succeeds*, and then the label — and its inheritance — is
+already written. A diagnostic that writes when it succeeds is not a diagnostic this
+plugin hands out; the two read-only checks above are.
+
+The report then went looking for the backend's own repair
+(`diagnose-windows-sandbox-acl`) on a `0.1.7-rc.2` install and found it missing,
+which it read as the package having dropped the skill from its `files` glob. It has
+not: measured on the published tarballs (2026-09-29), `0.1.7-rc.2` names the skill
+**zero times** in either README, ships no `assets/` directory at all, and carries no
+file containing the registration symbol — while `0.2.0-rc.2` ships
+`assets/diagnose-windows-sandbox-acl/{SKILL.md,scripts/diagnose-windows-sandbox-acl.ps1}`
+and names it three times per README. The skill is **new in `0.2.0`**; a `0.1.7`
+install that found the name was reading a `0.2.0`-era document. So the reach that
+works is the upgrade, not a packaging fix, and the advisory says so — item 4 below.
+
+`#8275` is the other direction: it had the skill, and the skill's own remedy
+(Full control) *worked*, after which it noticed that the Low label the successful
+apply writes is what regresses the two side effects it documents. Its proposal is to
+**degrade provisioning to DACL-only** when the label is the half being refused,
+which reads as though the label were one of two independent layers. It is not, and
+the advisory answers that with the mechanism rather than with a refusal — item 6
+below.
 
 `#7720` is worth reading for where the failure lands: the grant is materialized
 at sandbox **initialization**, so this is not one refused operation but *every*
@@ -105,6 +140,16 @@ Two consequences follow from that one line:
    what confines deletes to the workspace, and reverting it reintroduces the
    escape it closed. `#7750` asks for exactly this and explains why it is a
    usability regression traded for a security fix.
+
+   There is a **second boundary on that same line**, and `#8272` is what made it
+   worth stating: the backend's own repair, `diagnose-windows-sandbox-acl`, is not
+   part of `0.1.7-*` at all — it arrives with the **`0.2.0`** line, where the
+   package starts shipping it under `assets/`. A reader who found the skill named
+   in a README while running `0.1.7-rc.2` was reading a `0.2.0`-era document, not a
+   package that dropped something: that release's own README names it zero times and
+   no file in its tree carries the registration symbol. So the useful reach is the
+   upgrade, and the unhelpful one — repairing a `files` glob in a release that has
+   no such directory — is not offered.
 5. **The repair is per-directory, and the report is what established that.** `#8232`
    applied the `(WO)` line, watched the workspace start working, and then hit the
    same error on a *second* workspace root on the same volume. `(OI)(CI)` carries
@@ -112,6 +157,25 @@ Two consequences follow from that one line:
    sibling root is untouched by it. One line per workspace root is therefore the
    correct shape of the remedy, not one line per machine — and the advisory says so,
    because the natural reading of "it worked" is "it is fixed".
+6. **A "weaker grant" is a mechanism this backend cannot express, not a policy it
+   declines** (added in 0.9.0, from `#8275`). The label is what makes the apply a
+   SACL write, so declining it looks like dropping the expensive half — but there is
+   no DACL-only path to fall back to: the label rides the **same**
+   `SetNamedSecurityInfoW` as the grant (`acl.ts`: the flags are
+   `DACL_SECURITY_INFORMATION` alone only when the label edit is `keep`, and
+   `grantWrite`'s apply branch always passes `apply`), and the idempotence fast path
+   requires the exact label among its three conditions. And dropping the label alone
+   would not leave a working workspace: the confined token is itself lowered to Low
+   before any child starts (`token.ts`'s `restrictTokenIntegrity`, whose own comment
+   calls Low "the level the mandatory labels `grantWrite` applies are matched
+   against"), so the directory's Low label is what lets that Low child write there at
+   all under no-write-up. A DACL-only mode that keeps the token lowering yields a
+   workspace the sandbox can start a command in and the command then cannot write to;
+   one that drops the token lowering too — which is what `#8275`'s own appendix
+   records a community patch having to do — gives up half the confinement rather than
+   one of two independent layers. The advisory says this instead of a bare "no",
+   because a reader told only "no" reaches for the workaround without knowing what
+   else it has to change.
 
 The grant is materialized lazily, on the first confined call, and **nothing is
 cached when it throws** — so the same failure repeats per command (850 calls
@@ -133,6 +197,10 @@ A version boundary worth knowing before reaching for an older build: the label h
 Up to `0.1.6-alpha.x` the backend touched the DACL only (flag 4) ... `0.1.7-alpha.1` is where the mandatory
 label — and with it the SACL, flag 20 — arrives. ... Rolling back is not the fix either: the label is what
 confines deletes to the workspace, and reverting it reintroduces the escape it closed.
+
+The other boundary on that last line: the `diagnose-windows-sandbox-acl` skill is not part of `0.1.7-*` at all
+— it arrives with `0.2.0`, where the backend starts shipping it under `assets/`. The reach that works is the
+upgrade, not a packaging fix.
 
 Confirm the cause (unelevated) — `icacls` is a normal user command:
   icacls "D:\ws"
@@ -162,6 +230,14 @@ What will NOT fix it on its own — both look like the right move, and both were
     supplies the DACL half and still not WRITE_OWNER, the right this call needs.
   icacls "D:\ws" /reset /T /C
     restores inheritance, and inheritance is what supplied the Modify-only ACE above.
+
+One thing to know before asking for a weaker grant, because that is the next idea after this diagnosis —
+and it is not a smaller version of the same grant:
+  The label rides the SAME `SetNamedSecurityInfoW` as the DACL, so there is no DACL-only path to fall back
+  to — it would have to be built. And dropping the label alone would not leave a working workspace: the
+  backend lowers the confined token to Low before any child starts, and the directory's Low label is what
+  lets that Low child write here at all. Declining the label usefully means declining the token's Low level
+  with it, which gives up half the confinement rather than one of two independent layers.
 ```
 
 **Why the remedy forks** (added in 0.5.0). The same error covers two different
@@ -633,10 +709,19 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.7.1` re-ran all five lines above. A line whose probe fails is
-removed from the range rather than left claimed. The scratch tree's resolved
-versions are the ones to read back when a probe is quoted as evidence — the probe
-script pins them by exact version, and `--keep` leaves the tree in place to check.
+the plugin, so `0.7.1` re-ran all five lines above and `0.9.0` re-ran them again. A
+line whose probe fails is removed from the range rather than left claimed. The
+scratch tree's resolved versions are the ones to read back when a probe is quoted
+as evidence — the probe script pins them by exact version, and `--keep` leaves the
+tree in place to check.
+
+**The next line's pre-releases are outside that range on purpose**, and the guard
+in `test/packaging.spec.mjs` enforces it (a range that admits `0.2.0` fails the
+suite). `0.2.0-rc.2` — the build the newest report in this family runs, including
+its Desktop variant — was nevertheless probed by hand (`npm run test:probe-lines --
+0.2.0-rc.2`) and the suite goes green there, which is the honest reason to expect
+the plugin to work on it. It is a measurement, not a claim: the range widens when
+the `0.2.0` line is the released one rather than its pre-release.
 
 The mode lookup stays guarded through this version too: the native-init family
 needs the same resolved mode as the PTY family, and it takes it from the same
@@ -676,6 +761,8 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [discussion #7816]: https://github.com/deepseek-ai/deepseek-harness/discussions/7816
 [discussion #8232]: https://github.com/deepseek-ai/deepseek-harness/discussions/8232
+[discussion #8272]: https://github.com/deepseek-ai/deepseek-harness/discussions/8272
+[discussion #8275]: https://github.com/deepseek-ai/deepseek-harness/discussions/8275
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
 [discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
@@ -686,6 +773,8 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
 [#8232]: https://github.com/deepseek-ai/deepseek-harness/discussions/8232
+[#8272]: https://github.com/deepseek-ai/deepseek-harness/discussions/8272
+[#8275]: https://github.com/deepseek-ai/deepseek-harness/discussions/8275
 [#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193
 [#8174]: https://github.com/deepseek-ai/deepseek-harness/discussions/8174
 [#8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208

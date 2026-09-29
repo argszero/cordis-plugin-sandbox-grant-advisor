@@ -216,7 +216,29 @@ test('the version boundary is emitted in every class this module speaks in', () 
     const text = advisoryText(classifyProvisioningFailure(message))
     assert.match(text, /0\.1\.7-alpha\.1/, `the boundary must be present for: ${message}`)
     assert.match(text, /Rolling back is not the fix either/, `the boundary's second half must be present for: ${message}`)
+    // The second boundary is a fact about the *line*, not about the failing
+    // call, so it travels with the first: the built-in repair the later reports
+    // went looking for is not in `0.1.7-*` at all.
+    assert.match(text, /it arrives with `0\.2\.0`/, `the skill boundary must be present for: ${message}`)
   }
+})
+
+test('the built-in repair is placed on the line it actually ships on, not called a packaging gap', () => {
+  // #8272 read the skill's name in a README while running 0.1.7-rc.2 and
+  // reported the package as having dropped it. Measured on both published
+  // tarballs (2026-09-29): 0.1.7-rc.2 names `diagnose-windows-sandbox-acl` zero
+  // times in either README, ships no `assets/` at all, and no file in its tree
+  // carries the registration symbol; 0.2.0-rc.2 ships
+  // `assets/diagnose-windows-sandbox-acl/` and names it three times per README.
+  // Sending a reader to repair the `files` glob would be the wrong repair, so
+  // the advisory has to say the skill is new rather than missing.
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  assert.match(text, /`diagnose-windows-sandbox-acl` skill is not part of `0\.1\.7-\*` at all/)
+  assert.match(text, /starts shipping it under `assets\/`/)
+  assert.match(text, /was reading a `0\.2\.0`-era document/)
+  assert.match(text, /nothing was\s+dropped from the `0\.1\.7` file list, because there was nothing in `0\.1\.7` to drop/)
 })
 
 test('an href replaces the thread line without dropping the fix', () => {
@@ -245,6 +267,46 @@ test('the two remedies that look right and are not are named, with the reason ea
   // mirror-image error.
   assert.match(text, /What will NOT fix it on its own/)
   assert.match(text, /it is never the fix by itself/)
+})
+
+test('the weaker-grant idea is answered with the mechanism, not with a bare no', () => {
+  // #8275's proposal: degrade provisioning to DACL-only when the label is what
+  // gets refused. The advisory must not pretend that is a switch — the label
+  // rides the same `SetNamedSecurityInfoW` as the DACL, and there is no
+  // DACL-only apply path in `grantWrite` to fall back to — but it also must not
+  // stop at "no": a reader told only "no" reaches for a workaround without
+  // knowing what else it has to change.
+  const failure = classifyProvisioningFailure(REPORTED)
+  assert.ok(failure)
+  const text = advisoryText(failure)
+  assert.match(text, /One thing to know before asking for a weaker grant/)
+  // The reason there is nothing to fall back to: one call, two flags.
+  assert.match(text, /The label rides the SAME `SetNamedSecurityInfoW` as the DACL \(one call, two security-information flags\)/)
+  assert.match(text, /there is no DACL-only path to fall back to — it would have to be built/)
+  // The reason dropping the label alone does not work: the token is Low too, so
+  // the object's Low label is what lets the confined child write at all.
+  assert.match(text, /the backend lowers the confined token to Low before any child starts/)
+  assert.match(text, /the level the mandatory labels `grantWrite` applies are matched against/)
+  assert.match(text, /one the sandbox can start a command in and the command then cannot write to/)
+  assert.match(text, /Declining the label usefully means declining the token's Low level with it/)
+  // ...and it is still refused as a remedy, in the same breath, because the
+  // answer is a reason and not an offer.
+  assert.match(text, /This is not offered here as a fix, and neither is `danger-full-access`/)
+})
+
+test('the weaker-grant section is emitted only for the class whose diagnosis is the missing right', () => {
+  // `read-denied` wants READ_CONTROL and `apply-other` is not an access denial at
+  // all, so neither one's diagnosis invites declining the label. Emitting the
+  // section there would attach a claim to a class that has not established its
+  // premise — the failure mode this module is built to avoid.
+  for (const message of [
+    'SetNamedSecurityInfoW failed (Win32 1332): grantWrite(D:\\ws)',
+    'GetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)',
+  ]) {
+    const text = advisoryText(classifyProvisioningFailure(message))
+    assert.doesNotMatch(text, /One thing to know before asking for a weaker grant/, message)
+    assert.doesNotMatch(text, /there is no DACL-only path to fall back to/, message)
+  }
 })
 
 test('the remedy forks on ownership, because one command cannot serve both environments', () => {

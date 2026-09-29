@@ -212,10 +212,30 @@ const MUTATIONS = [
     edits: [["    'Two producers have been measured under a confining Windows mode. Check which one this is:',", "    'This was an MSYS2 program:',"]],
   },
   {
-    name: 'the closing line offers a widened mode as the fix',
+    // 0.9.0's first addition: #8272 read the skill's name in a README while
+    // running 0.1.7-rc.2 and reported a dropped `files` entry. Measuring both
+    // published tarballs shows the skill is new in 0.2.0, so an advisory that
+    // sends the reader to repair a packaging glob sends them to the wrong repair.
+    name: 'the skill boundary is stated as a dropped packaging entry instead of a later line',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    'widens the sandbox — the checks above are yours to make, and `danger-full-access` is not offered as a fix.',", "    'widens the sandbox — run the session with `danger-full-access` and the command will start.',"]],
+    edits: [["    'dropped from the `0.1.7` file list, because there was nothing in `0.1.7` to drop.',", "    'dropped from the `0.1.7` file list, so upgrade or repair the glob to get it back.',"]],
+  },
+  {
+    // 0.9.0's second addition: #8275 reads the label as a layer that can be
+    // declined. The token is lowered to Low too, and the object's Low label is
+    // what lets that child write — an advisory that calls the label independent
+    // hands the reader a degradation that leaves the workspace unwritable.
+    name: 'the label is presented as an independent layer that can be declined alone',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '  not leave a working workspace: the backend lowers the confined token to Low before any child starts, and its',", "    '  not leave a working workspace: the label is an independent second layer of defence, and the backend\\'s',"]],
+  },
+  {
+    name: 'the weaker-grant section is emitted for every class instead of the one it is about',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    ...(failure.klass === 'apply-denied' ? [...degradedGrant(), ''] : []),", "    ...degradedGrant(),"]],
   },
 ]
 

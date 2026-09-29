@@ -39,6 +39,23 @@
  *   one-liner would send the second environment to a command that is refused
  *   before it runs — the same defect this module exists to answer, a remedy that
  *   does not work delivered confidently.
+ *
+ *   **Two later reports add shape and a boundary, not a new cause.** `#8272`
+ *   arrived at the missing right with an independent probe (it set a Low
+ *   integrity level on a directory it owned, unelevated, and was refused — the
+ *   label half isolated from the merged call), and then went looking for the
+ *   backend's own `diagnose-windows-sandbox-acl` skill on a `0.1.7-rc.2` install,
+ *   where it does not exist: the skill is new in **`0.2.0`**, and that release's
+ *   README is where the promise was read. So the boundary section states where
+ *   the skill actually arrives, and calls the "the package dropped it" reading
+ *   what it is — version skew, not a `files` glob. `#8275` adds the question the
+ *   diagnosis invites: whether the label half can simply be declined, since the
+ *   label is what makes the apply a SACL write. It can't, and the reason is a
+ *   mechanism rather than a policy — the label rides the *same* call as the grant
+ *   and the confined token is itself lowered to Low, so a DACL-only mode that
+ *   keeps the token lowering yields a workspace the confined child cannot write
+ *   to. That is stated instead of a bare "no", because a reader told only "no"
+ *   reaches for the workaround without knowing what else it would have to change.
  * - **The persistent-shell failure** (`pty-startup`) is *not* fixable by the
  *   caller — least of all by the model, which has no shell to run anything in.
  *   So its advice says so and stops: the remedy is a user-side preset choice,
@@ -96,7 +113,7 @@ import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
 /** The upstream threads the ACL advisory is a stopgap for. */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232 / #8272 / #8275'
 
 /** The upstream thread the persistent-shell advisory is a stopgap for. */
 export const PTY_DISCUSSIONS = '#7638'
@@ -277,7 +294,57 @@ function versionBoundary(): string {
     '`0.1.6-alpha.x`-or-older line this exact failure therefore belongs to a different cause space, while on any',
     '`0.1.7-*` line it is this one. Rolling back is not the fix either: the label is what confines deletes to the',
     'workspace, and reverting it reintroduces the escape it closed.',
+    '',
+    'The other boundary on that last line, for a reader who goes looking for the built-in repair: the',
+    '`diagnose-windows-sandbox-acl` skill is not part of `0.1.7-*` at all — it arrives with `0.2.0`, which is where',
+    'the backend starts shipping it under `assets/`. A `0.1.7-rc.2` install that found the skill named in a README',
+    'was reading a `0.2.0`-era document: that release\'s own README names it zero times, and no file in its tree',
+    'carries the registration symbol. The reach that works is the upgrade, not a packaging fix — nothing was',
+    'dropped from the `0.1.7` file list, because there was nothing in `0.1.7` to drop.',
   ].join('\n')
+}
+
+/**
+ * Why a "weaker grant" is not a smaller version of the same thing.
+ *
+ * The natural next question after "this needs `WRITE_OWNER`" is whether the
+ * label can simply be declined — the label is what makes the apply a SACL write,
+ * so dropping it looks like dropping the expensive half. The answer is that the
+ * two halves are one mechanism, and the shape of the answer matters more than
+ * the verdict: a reader who is told only "no" reaches for the community workaround
+ * without knowing what else it has to change.
+ *
+ * Everything here is read off the shipped source rather than inferred: the label
+ * rides the **same** `SetNamedSecurityInfoW` as the grant (`acl.ts`: the
+ * security-information flags are `DACL_SECURITY_INFORMATION` alone only when the
+ * label edit is `keep`, and `grantWrite`'s apply branch always passes `apply`),
+ * and the confined token is lowered to Low before any child starts
+ * (`token.ts`'s `restrictTokenIntegrity`, whose own comment calls Low "the level
+ * the mandatory labels `grantWrite` applies are matched against"). The directory's
+ * Low label is therefore what lets the Low child write there at all under
+ * no-write-up — so "sandbox works, workspace unlabelled" is not a configuration
+ * this backend can express.
+ *
+ * Emitted only for `apply-denied`, the class whose diagnosis is the missing
+ * `WRITE_OWNER`: that is the one where the label is what gets refused, and so the
+ * only one where declining it is an idea a reader could have.
+ * @returns the section's lines.
+ */
+function degradedGrant(): string[] {
+  return [
+    'One thing to know before asking for a weaker grant, because that is the next idea after this diagnosis —',
+    'and it is not a smaller version of the same grant:',
+    '  The label rides the SAME `SetNamedSecurityInfoW` as the DACL (one call, two security-information flags), so',
+    '  there is no DACL-only path to fall back to — it would have to be built. And dropping the label alone would',
+    '  not leave a working workspace: the backend lowers the confined token to Low before any child starts, and its',
+    '  own comment calls Low "the level the mandatory labels `grantWrite` applies are matched against". The',
+    '  directory\'s Low label is what lets that Low child write here at all; a workspace that keeps the token',
+    '  lowering but not the label is one the sandbox can start a command in and the command then cannot write to.',
+    '  Declining the label usefully means declining the token\'s Low level with it — which gives up half the',
+    '  confinement rather than one of two independent layers, and is a different proposal from dropping a layer',
+    '  that was never load-bearing.',
+    'This is not offered here as a fix, and neither is `danger-full-access`.',
+  ]
 }
 
 /**
@@ -369,8 +436,11 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     'inherits Full control for you — and open the session on that one.',
     '',
     ...nonFixes(failure, path),
+    ...(failure.klass === 'apply-denied' ? [...degradedGrant(), ''] : []),
     'How to read this: the harness documents the prerequisite (' + PREREQUISITE + ') and this',
     'error does not name it yet, so the advice is delivered here instead. This is a stopgap, ' + where + '.',
+    'It arrives through the session rather than through a shell, which is the thing this failure has just taken',
+    'away — the reason a repair script cannot be the answer at the moment it is needed.',
     'What it is NOT: this plugin neither edits ACLs nor elevates — the command above is yours to run.',
     'Your file read/write tools still work; only sandboxed command execution is blocked.',
   ].join('\n')
