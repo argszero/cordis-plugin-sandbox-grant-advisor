@@ -237,6 +237,39 @@ const MUTATIONS = [
     arms: 'signature.spec.mjs',
     edits: [["    ...(failure.klass === 'apply-denied' ? [...degradedGrant(), ''] : []),", "    ...degradedGrant(),"]],
   },
+  {
+    // 0.10.0's first addition: #8312 reports the other end of the same backend.
+    // The grant is not a per-session effect — an advisory that reads as if the
+    // harness takes it back when it exits sends the reader past the one fact the
+    // reports could only learn from a broken build in another project.
+    name: 'the grant reads as temporary, as if the harness took it back on exit',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '  The three entries are STANDING, deliberately, and nothing revokes them. The workspace grant is a reuse cache:',", "    '  The three entries are removed when the harness exits. The workspace grant is a reuse cache:',"]],
+  },
+  {
+    name: 'the advisory ships a removal command for the label it cannot remove',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '  WRITE_OWNER — the same right this whole failure is about. This advisory hands over no removal command: the',", "    '  WRITE_OWNER — the same right this whole failure is about. Remove it with `icacls \"<dir>\" /setintegritylevel',"]],
+  },
+  {
+    name: 'the persistent-shell failure is called intermittent instead of deterministic per mode and host',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'Which sessions fail inside that combination is not chance — it is deterministic per (session mode × the host',", "    'Which sessions fail inside that combination looks like chance — it comes and goes, an intermittent flake whose host',"]],
+  },
+  {
+    // The bundle patch is published prose with no compiler over it: the release
+    // that added threads to the second and third families updated the advisory and
+    // the manifest and left this file describing three families as two, because
+    // the only assertion on it was that it exists and names the package. This arm
+    // keeps the new assertion honest.
+    name: 'the mount instructions drop one of the second family\'s threads',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [['(#7638, #8322)', '(#8322)']],
+  },
 ]
 
 let silent = 0

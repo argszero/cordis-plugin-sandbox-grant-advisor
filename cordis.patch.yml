@@ -45,6 +45,20 @@
 # the confined token is itself lowered to Low, so the directory's Low label is
 # what lets that child write there at all.
 #
+# And it says WHAT THE GRANT LEAVES BEHIND once it applies (#8312, #8314): the
+# three entries are STANDING and nothing revokes them (the backend's own dispose
+# and fail-closed paths leave them — "the intended end state (the reuse cache)"),
+# the Low integrity label is INHERITABLE and lives in the SACL (so `icacls /reset`
+# does not remove it — that rebuilds the DACL), a process starts at
+# min(user, image) integrity, and an NTFS hard link shares one security descriptor
+# with the file object it names — so in a pnpm workspace, whose node_modules are
+# hard links into a content-addressed store, the label can reach OUTSIDE the tree
+# and stay on the store's objects, after which unrelated builds fail in ways that
+# name the build tool and not DSH. The section is stated before the reader runs
+# the command, and it ships NO removal command: the maintainers' own diagnosis
+# skill reports the label and does not remove it, and removing an integrity label
+# needs WRITE_OWNER.
+#
 # Optional config:
 #
 #   - set:
@@ -64,15 +78,23 @@
 # this environment, and it is bounded by `maxDenials`, because a plugin that can
 # stop command execution must never be the reason a session cannot finish.
 #
-# A SECOND family is recognized on the same seam (#7638): with the `minimal`
-# preset and a confining sandbox mode, every shell call dies instantly with
+# A SECOND family is recognized on the same seam (#7638, #8322): with the
+# `minimal` preset and a confining sandbox mode, every shell call dies instantly
+# with
 #
 #   PTY shell exited during startup
 #
 # The terminal backend cannot create the pseudo-console inside the sandbox, so
 # the child exits before its first prompt; retrying never helps and `minimal`
-# mounts no fallback shell tool. That advisory states the resolved mode, tells
-# the model to STOP rather than retry, and hands the user a preset choice — it
+# mounts no fallback shell tool. Inside that combination the HOST BINARY decides
+# (#8322, one runner and one ConPTY in every arm): a console-subsystem `node.exe`
+# host starts the confined shell, while the packaged desktop's GUI-subsystem
+# Electron host kills it silently — the same console rule the third family
+# states, where a restricted token can inherit a console but not create one. The
+# outcome is deterministic per (session mode x runner host), and the mode that
+# counts is the one the session records. That advisory states the resolved mode,
+# tells the model to STOP rather than retry, and hands the user the choices — a
+# preset swap, a profile-patch row, or a host that owns a console (#8313); it
 # never names a command to run (there is no shell to run it in) and never names
 # a shell tool the failing composition does not mount. It is sent only when the
 # mode the call actually ran under confines; otherwise the failure is left
@@ -81,6 +103,28 @@
 # above deliberately does NOT cover this family: its remedy is a patch-layer
 # change the user makes between sessions, not a command that repairs the
 # running one.
+#
+# A THIRD family is recognized from a value, not from text (#7876, #7877,
+# #8193, #8208, #8313):
+#
+#   [exit code: -1073741502]        (0xC0000142 STATUS_DLL_INIT_FAILED)
+#
+# A confined Windows child died while its native images were loading, i.e.
+# before its entry point. It reaches the tool result as an ordinary nonzero
+# exit code — upstream's runner-failure rules admit only exit 127 with the
+# `windows-acl-run: ` signature, so this code is never reclassified and never
+# arrives as an error — which is why a plugin reading only error results is
+# structurally blind to it, and why the model retries a command that cannot
+# start. The read is the shell tool's own canonical value
+# (`ToolExecutionSuccess.value`, `kind: 'foreground'`), so no line of rendered
+# text can be mistaken for it. The advisory states the resolved mode, says the
+# process never reached its entry point, enumerates the measured producers
+# (an MSYS2 / Git-Bash program that cannot create its signal pipe under the
+# restricted token; the sandbox runner hosted by a GUI-subsystem Electron binary
+# or spawned without a console), carries the one conversion the model can make
+# itself (rewrite the work as PowerShell or `cmd`), names the remedy #8193
+# measured — a real node.exe host, which the desktop ships — and says plainly
+# which producers it does not know. Like the second family, it is mode-gated.
 
 - insert:
     - id: sandbox-grant-advisor

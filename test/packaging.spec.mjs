@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
-import { ACL_DISCUSSIONS } from '../lib/advice.js'
+import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS } from '../lib/advice.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
@@ -190,6 +190,16 @@ test('the shipped bundle patch describes the family the advice module covers, an
   assert.ok(tracked.length >= 10, `expected the advice module to name the family, read ${tracked.length}`)
   for (const id of tracked) {
     assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
+  }
+  // All three families, not only the first: the patch documents what the plugin
+  // recognizes, and a family whose threads are missing from it is a family the
+  // mount instructions do not admit exists. The last release that added threads
+  // to the second and third families left this file behind for exactly that
+  // reason — only the first list was wired to an assertion.
+  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS]]) {
+    for (const id of discussions.match(/#\d+/g) ?? []) {
+      assert.ok(patch.includes(id), `the bundle patch never names ${id} (${name}), which the advisories cover`)
+    }
   }
   assert.ok(/\(Get-Acl/.test(patch), 'the bundle patch does not hand over the ownership check its remedy is forked on')
   assert.ok(/\(WO\)/.test(patch), 'the bundle patch does not name the narrow right; the broad one-liner is the remedy that is refused on a directory the caller does not own')

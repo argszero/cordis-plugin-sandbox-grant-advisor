@@ -368,6 +368,52 @@ test('the non-fix section follows the placeholder rule too', () => {
   assert.doesNotMatch(text, /takeown \/F ""/)
 })
 
+test('the grant is described from the other side, because this module is what hands it over', () => {
+  // #8312 / #8314 report the end of the same backend the other twelve reports
+  // describe: not the write that fails, but what the successful one leaves
+  // behind. The facts are read off the shipped source, and the two that a reader
+  // cannot discover from the error are the ones this asserts first.
+  const text = advisoryText(classifyProvisioningFailure(REPORTED))
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /What the grant leaves behind, once it applies/)
+  // Standing by design — the dispose path and the fail-closed path both say so,
+  // in the backend's own words, which is why they are quoted instead of
+  // paraphrased.
+  assert.match(flat, /The three entries are STANDING, deliberately, and nothing revokes them/)
+  assert.match(flat, /the intended end state \(the reuse cache\), not an error artifact/)
+  assert.match(flat, /They outlive the session and the harness/)
+  assert.match(flat, /`sandbox-windows-acl\/src\/grant\.ts`, `src\/index\.ts`/)
+  // The label is the half a DACL reset cannot reach, and the reason every child
+  // started from the tree runs at Low integrity.
+  assert.match(flat, /The Low integrity label is INHERITABLE \(`\(OI\|CI\)`\) and it lives in the SACL/)
+  assert.match(flat, /that command rebuilds the DACL/)
+  assert.match(flat, /Windows starts a process at the minimum of the user's and the program's integrity/)
+  // The reach past the tree, attributed to the report that measured the chain
+  // rather than asserted as our own measurement — this project has no Windows
+  // host, and the backend's own suite is what pins the link boundary.
+  assert.match(flat, /An NTFS hard link is a SECOND NAME for one file object/)
+  assert.match(flat, /a workspace hard link lets the grant reach an external file object/)
+  assert.match(flat, /\(#8314 measured the whole chain\)/)
+  // Both halves of the pair are named upstream, so a reader can follow either.
+  assert.ok(ACL_DISCUSSIONS.includes('#8312') && ACL_DISCUSSIONS.includes('#8314'), ACL_DISCUSSIONS)
+})
+
+test('the label gets no removal command, and the reason replaces it', () => {
+  // The one command that would remove an inheritable integrity label must not be
+  // published here. This project cannot verify a line on Windows, and an
+  // unverified removal handed to a reader is the same defect the rest of this
+  // module exists to answer — the maintainers' own diagnosis skill stops at
+  // reporting it too.
+  const text = advisoryText(classifyProvisioningFailure(REPORTED))
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /This advisory hands over no removal command/)
+  assert.match(flat, /removing an integrity label needs/)
+  assert.match(flat, /reports `LOW_LABEL` and by design does not remove it/)
+  // `/setintegritylevel` is the command that removes one; `/grant` and `/reset`
+  // above are the DACL half and stay.
+  assert.doesNotMatch(text, /setintegritylevel/i)
+})
+
 test('each class explains itself instead of borrowing another class\'s story', () => {
   const denied = advisoryText(classifyProvisioningFailure(REPORTED))
   const other = advisoryText(classifyProvisioningFailure('SetNamedSecurityInfoW failed (Win32 1332): grantWrite(D:\\ws)'))
@@ -504,6 +550,34 @@ test('the persistent-shell advisory names the mode, the combination, and the use
   assert.doesNotMatch(text, /USERNAME/)
   // The negative decision is stated, not implied: silence would read as "not the sandbox".
   assert.match(flat, /this plugin stays silent, because a shell can fail to start for other reasons/)
+})
+
+test('the persistent-shell advisory names the host binary, not chance', () => {
+  // #8322 separated the arms inside one confining mode with the same runner and
+  // the same ConPTY throughout: what changes the outcome is the host binary that
+  // carries the runner. An advisory that leaves this out invites the reader to
+  // conclude the failure is flaky, when the same (mode × host) pair fails every
+  // single time.
+  const failure = classifyPtyStartupFailure(PTY_EXIT)
+  assert.ok(failure)
+  const text = advisoryText(failure, { mode: 'workspace-write' })
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /deterministic per \(session mode × the host/)
+  assert.match(flat, /a "working now" attempt in the same session is not evidence of flakiness/)
+  // Both arms, named: the two hosts differ only by their subsystem, and the
+  // console rule behind it is the one the third family already states.
+  assert.match(flat, /console-subsystem `node\.exe` → the confined shell starts/)
+  assert.match(flat, /GUI-subsystem Electron executable/)
+  assert.match(flat, /a console can be INHERITED but not CREATED/)
+  // The mode that decides is the recorded one — the second half of #8322, and the
+  // reason a restart with a different environment does not clear the failure.
+  assert.match(flat, /the mode that decides is the one the SESSION records/)
+  // The console-owning host that works is named as a user-side option, from the
+  // report that found the same variable from the outside.
+  assert.match(flat, /#8313/)
+  assert.ok(PTY_DISCUSSIONS.includes('#8322'), PTY_DISCUSSIONS)
+  // Still no command: there is no shell to run one in.
+  assert.doesNotMatch(text, /icacls/)
 })
 
 test('the persistent-shell advisory covers the unowned tool and url variants', () => {

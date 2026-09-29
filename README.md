@@ -44,6 +44,11 @@ inherited `Authenticated Users: Modify` is the whole of their access). In each o
 every sandboxed command fails the same way, before it runs, and the error names
 neither the missing right nor a remedy.
 
+Two further reports — [discussion #8312] and [discussion #8314] — describe the
+other end of the same backend: what its grant leaves behind *after* it applies.
+The advisory states that too (see [What the grant leaves behind](#what-the-grant-leaves-behind-added-in-0100)),
+because the advisory is the thing handing over the command that applies the grant.
+
 `#8232` contributes two facts about the *shape* of the failure rather than its
 cause, and both are in the advisory now. One is that the failure belongs to the
 **workspace, not the command**: there a `Get-Date` failed exactly like anything
@@ -229,7 +234,27 @@ What will NOT fix it on its own — both look like the right move, and both were
     makes you the owner, and ownership's implicit rights are READ_CONTROL and WRITE_DAC only — so it
     supplies the DACL half and still not WRITE_OWNER, the right this call needs.
   icacls "D:\ws" /reset /T /C
-    restores inheritance, and inheritance is what supplied the Modify-only ACE above.
+    restores inheritance, and inheritance is what supplied the Modify-only ACE above. Where it strips the last
+    entry naming you, the directory ends up in exactly the state the diagnosis above describes — its only access
+    the inherited `Authenticated Users:(M)` (#8314 measured that follow-on failure).
+
+What the grant leaves behind, once it applies — worth knowing before you run the command above, because the
+backend does not take it back:
+  The three entries are STANDING, deliberately, and nothing revokes them. ... They outlive the session and the
+  harness exiting (`sandbox-windows-acl/src/grant.ts`, `src/index.ts`).
+  The Low integrity label is INHERITABLE (`(OI|CI)`) and it lives in the SACL — which is why the `icacls /reset`
+  above does not take it off: that command rebuilds the DACL. Windows starts a process at the minimum of the
+  user's and the program's integrity, so anything started from a tree the harness has written to runs at LOW
+  integrity, and none of the symptoms names DSH (#8312 collects them): ... (#7709), ... (#8175), ... (#7735).
+  It can also leave the workspace. An NTFS hard link is a SECOND NAME for one file object, so both names share
+  one security descriptor — and a pnpm workspace is largely hard links (`node_modules` pointing into a
+  content-addressed store on the same volume). ... `vite build` unable to remove its own temp file, `pnpm
+  install` unable to replace a hook (#8314 measured the whole chain). ...
+  It is also why the label is not simply removable here: ... This advisory hands over no removal command: the
+  maintainers' own skill does not, and an unverified one would be the defect this plugin exists to answer.
+None of this makes the command above the wrong move — without it, nothing sandboxed runs in this workspace. It
+is what the harness does to a directory it has been pointed at, and it is worth knowing before rather than
+discovering it as a broken build in some other project later.
 
 One thing to know before asking for a weaker grant, because that is the next idea after this diagnosis —
 and it is not a smaller version of the same grant:
@@ -255,6 +280,54 @@ actionable-guidance half of what [#7771] asked for. Until 0.5.0 a single
 unconditional one-liner was printed, with a sentence noting it assumed
 ownership; that would have sent the second environment to a command that is
 denied — the same defect this plugin exists to answer.
+
+#### What the grant leaves behind (added in 0.10.0)
+
+[Discussion #8312] and [discussion #8314] report the other half of this backend,
+and the advisory now states it — before the reader runs the command it is being
+handed, because that command is what makes the backend's grant apply:
+
+- **The three entries are standing, by design, and nothing revokes them.** The
+  workspace grant is a *reuse cache*: the backend's dispose path revokes the
+  revocable (temp) grants and leaves the workspace edits, and its fail-closed
+  cleanup says the same in plainer words — standing ACEs "are NOT revoked — they
+  are the intended end state (the reuse cache), not an error artifact"
+  (`src/grant.ts`, `src/index.ts`). They outlive the session and the harness
+  exiting. ([#8312] arrived at this from the README's own description of the
+  cache; the source is quoted in the advisory.)
+- **The Low integrity label is inheritable, and it lives in the SACL.** That is
+  why `icacls /reset` — already listed as a non-fix for a different reason — does
+  not remove it: the command rebuilds the DACL. Windows starts a process at
+  `min(user, image)` integrity, so anything started from a tree the harness has
+  written to runs at Low integrity, and none of the symptoms points at DSH:
+  an Electron/Chromium app exiting `0x80000003` with no output ([#7709]),
+  msbuild / dotnet / npm refusing or warning about the files as if they came from
+  the Internet when no `Zone.Identifier` exists ([#8175]), a double-clicked
+  `.exe` / `.cmd` reporting "publisher could not be verified" ([#7735]).
+- **It can leave the workspace.** An NTFS hard link is a second name for one
+  file object, so both names share one security descriptor — and a pnpm workspace
+  is largely hard links (`node_modules` pointing into a content-addressed store
+  on the same volume). The inheritable label therefore lands on the *store's*
+  objects and stays there, after which every project building from that store
+  gets executables that start at Low integrity and failures that name the build
+  tool ([#8314] measured the whole chain: `vite build` unable to remove its own
+  temp file, `pnpm install` unable to replace a hook). The backend's own suite
+  pins the reach as a known boundary — *"a workspace hard link lets the grant
+  reach an external file object"* (`tests/runner.spec.ts`) — and its README calls
+  refusing multiply-linked files unviable for ordinary pnpm installs, which
+  leaves the out-of-tree reach open rather than unknown.
+- **No removal command is shipped.** The maintainers' own
+  `diagnose-windows-sandbox-acl` skill *reports* `LOW_LABEL` and by design does
+  not remove it, and removing an integrity label needs `WRITE_OWNER` — the same
+  right this whole failure is about. This project has no Windows host to verify a
+  line on, so shipping one would be exactly the defect the rest of this module
+  exists to answer; the section says where it stops instead.
+
+The section is emitted for **every** ACL class, like the version boundary and for
+the same reason: it is a fact about the package's grant, and that grant is the
+remedy the advisory hands over in all three classes. It also closes with what the
+fact does *not* mean — the command is still the right move, because without it
+nothing sandboxed runs at all.
 
 **What is deliberately *not* shipped**: `icacls ... /grant "<user>:(OI)(CI)(WD,WO)"`,
 the two needed rights named explicitly. It is the tighter form and it is
@@ -287,6 +360,27 @@ built with the **resolved** mode the failing call actually ran under — from
 `ctx.sandboxPolicy.resolve({ session })`, the same resolver the terminal layer
 calls before spawning, with the same session.
 
+**Inside a confining mode, the host binary decides** (added in 0.10.0).
+[Discussion #8322] ran the control one level deeper — same runner, same ConPTY,
+every arm — and separated what the mode alone does not: with the runner hosted by
+a plain console-subsystem `node.exe`, the confined shell starts and its prompt and
+shell-integration marks are correct; with the runner hosted by the packaged
+desktop's GUI-subsystem Electron executable, the child dies **silently** — zero
+bytes on stdout *and* stderr, and the non-interactive arm exits 0 with everything
+it printed lost. It is the same rule the `0xC0000142` family states for its own
+case: under the restricted token a console can be **inherited but not created**,
+so the binary that owns one (or owns none) is what the arms turn on. That is also
+why the same version behaves differently depending on how it was started: the
+desktop app fails where the Web UI launched from a terminal — whose
+`process.execPath` is a real `node.exe` — is reported working under the same
+confining mode ([#8313], whose sibling report is the `0xC0000142` shape of the
+same host difference). The advisory therefore names the host alongside the mode,
+says the outcome is **deterministic per (session mode × host)** rather than
+intermittent, and adds that the mode which counts is the one the **session
+records**, not the one the environment now holds — a session that recorded the
+confining mode keeps failing after the app is restarted with another mode in its
+environment, while switching it inside the session takes effect at once.
+
 The advisory that follows is addressed to **two different readers**:
 
 ```
@@ -299,6 +393,15 @@ The `bash` tool is a PERSISTENT PTY session (a shell that stays alive between ca
 `workspace-write` — not `danger-full-access`. A confining mode spawns the shell through the sandbox, and there the
 terminal backend cannot create the pseudo-console at all, so the child exits before its first prompt. ...
 
+Which sessions fail inside that combination is not chance — it is deterministic per (session mode × the host
+binary carrying the sandbox runner) ... Measured against the desktop build with the same runner and the same
+ConPTY in every arm (#8322):
+  - runner hosted by a plain console-subsystem `node.exe` → the confined shell starts ...;
+  - runner hosted by the packaged desktop's GUI-subsystem Electron executable ... → the child dies silently ...
+The rule behind both this and the `0xC0000142` family ... is the one stated there for its own case: under the
+restricted token a console can be INHERITED but not CREATED ... And the mode that decides is the one the SESSION
+records, not the one the environment now holds ...
+
 Do NOT retry, and do not look for a command that fixes it: every attempt will fail identically, and there is no
 shell to run a command in. Use your file read/write tools instead, and hand the choice below to the user.
 
@@ -309,8 +412,11 @@ What unblocks the session — the user's decision, not the model's:
      `$DSH_HOME/cordis.patch.yml` for every profile — replacing its `persistent-shell` group with
      `@deepseek-ai/dsh-tool-pwsh` (a one-shot subprocess, no PTY); the patch layer is yours, so an upgrade
      will not overwrite it; or
-  3. run the session with `danger-full-access`, which drops the very confinement the sandbox exists to give.
-     Prefer 1 or 2.
+  3. run the session from a host that owns a console instead of the packaged desktop app — the Web UI started
+     from a terminal (`process.execPath` is a real `node.exe` there) was reported working under the same
+     confining mode and the same version (#8313); or
+  4. run the session with `danger-full-access`, which drops the very confinement the sandbox exists to give.
+     Prefer 1 to 3.
 ```
 
 The model's instruction is to **stop** — not to run a command (there is no shell
@@ -331,9 +437,10 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Four reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
-app) and [`#7877`] (MSYS2 / Git Bash) — and [`#8208`], which found the mechanism
-the console cases share. All are `0xC0000142`
+Five reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+app), [`#8313`] (the same version and the same mode run as the desktop app versus
+the Web UI launched from a terminal, which works) and [`#7877`] (MSYS2 / Git
+Bash) — and [`#8208`], which found the mechanism the console cases share. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
@@ -648,6 +755,17 @@ than one that stays silent.
   one-line experiment and the reporter's own control, and both advisories say
   where they stop. The native-init family is the one that needs no Windows to be
   faithful, because what it reads is a number inside a JSON value.
+- **The standing-grant section is source-level, and the out-of-tree reach is the
+  reporter's measurement.** What this section states about the backend's own
+  behaviour — that the workspace grant is standing, that nothing in the dispose or
+  fail-closed path revokes it, that the Low label is inheritable and lives in the
+  SACL — is read off the shipped source and the backend's own suite, and is quoted
+  as such. What it states about a hard link carrying the label onto a
+  content-addressed store is [#8314]'s measurement on their machine, which is why
+  the advisory attributes it instead of asserting it as a property of every
+  workspace, and why **no removal command is shipped**: this project has no
+  Windows host on which to verify one, and an unverified removal command is the
+  same defect this plugin exists to answer.
 - **It repairs nothing and elevates nothing.** If the directory really is
   Full-control for the caller, the remaining ACL hypothesis is
   `SeSecurityPrivilege` — i.e. the backend's documented prerequisite would be
@@ -778,3 +896,13 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193
 [#8174]: https://github.com/deepseek-ai/deepseek-harness/discussions/8174
 [#8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208
+[discussion #8312]: https://github.com/deepseek-ai/deepseek-harness/discussions/8312
+[discussion #8314]: https://github.com/deepseek-ai/deepseek-harness/discussions/8314
+[discussion #8322]: https://github.com/deepseek-ai/deepseek-harness/discussions/8322
+[#7709]: https://github.com/deepseek-ai/deepseek-harness/discussions/7709
+[#7735]: https://github.com/deepseek-ai/deepseek-harness/discussions/7735
+[#8175]: https://github.com/deepseek-ai/deepseek-harness/discussions/8175
+[#8312]: https://github.com/deepseek-ai/deepseek-harness/discussions/8312
+[#8313]: https://github.com/deepseek-ai/deepseek-harness/discussions/8313
+[#8314]: https://github.com/deepseek-ai/deepseek-harness/discussions/8314
+[#8322]: https://github.com/deepseek-ai/deepseek-harness/discussions/8322
