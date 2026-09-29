@@ -423,24 +423,36 @@ function nativeInitAdvisory(
     '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',
     '     the ACL runner appear among its processes while the command runs?); from inside the session they are',
     '     one finding with one remedy, so nothing here waits on telling them apart.',
-    onElectron
-      ? '     This process IS an Electron binary (`process.versions.electron` is set), so that producer applies here:'
-      : '     This process is NOT an Electron binary (`process.versions.electron` is unset), so the runner is a real',
-    onElectron
-      ? '     run the same command with `danger-full-access`, or from an unpacked `node apps/cli/lib/bin.js web`'
-      : '     Node binary here and that producer cannot be the cause. If the program was not an MSYS2 one either,',
-    onElectron
-      ? '     host where the runner is a real Node binary. The command starts there in either shape, and that — the host, not the flags — is the discriminator.'
-      : '     this failure is outside both measured producers: stop and hand it to the user.',
+    ...(onElectron
+      ? [
+          '     This process IS an Electron binary (`process.versions.electron` is set), so that producer applies here.',
+          '     The way out is a real node host, not a wider mode: the packaged desktop ships one at',
+          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the unpacked',
+          '     `node apps/cli/lib/bin.js web` host works for the same reason — the same confined `pwsh`/`cmd` calls',
+          '     start there (#8193 measured exit 81/82). The command starts there in either shape, and that — the',
+          '     host, not the flags — is the discriminator. `danger-full-access` only CONFIRMS the diagnosis: on this',
+          '     platform it silently removes the sandbox from every shell call. Do not unset `ELECTRON_RUN_AS_NODE`',
+          '     instead either — the desktop runner IS that Electron binary, so without it `runner.js` cannot',
+          '     execute at all (#8193 records this interaction with #8174).',
+        ]
+      : [
+          '     This process is NOT an Electron binary (`process.versions.electron` is unset), so the runner is a real',
+          '     Node binary here and that producer cannot be the cause. If the program was not an MSYS2 one either,',
+          '     this failure is outside both measured producers: stop and hand it to the user.',
+        ]),
     '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',
     'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
     '',
     'Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of',
-    'its own DLLs dies this way too, and the sandbox backend\'s own source records that a child started with',
-    'a hidden console window does as well (which is why that backend avoids `CREATE_NO_WINDOW`). This is not',
-    'a claim that the sandbox caused the failure — the code cannot say that. What is claimed is narrower and',
-    'checkable: the process never reached its entry point, and under this mode these two producers are known.',
+    'its own DLLs dies this way too, and the backend\'s own source records that a child created with a hidden',
+    'console window can as well (`CREATE_NO_WINDOW` can fail restricted-token DLL initialization). #8193',
+    'refines that recording rather than repeating it: `CREATE_NO_WINDOW` is not among the flags actually passed',
+    '(they are `CREATE_SUSPENDED`, and `CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the unrestricted',
+    'path), and the same flags succeed under a real-node host — so the flag is a necessary ingredient and the',
+    'host process image is what turns it fatal. This is not a claim that the sandbox caused the failure — the',
+    'code cannot say that. What is claimed is narrower and checkable: the process never reached its entry',
+    'point, and under this mode these two producers are known.',
     '',
     'This is a stopgap, ' + where + '. What it is NOT: this plugin neither changes an environment nor',
     'widens the sandbox — the checks above are yours to make, and `danger-full-access` is not offered as a fix.',

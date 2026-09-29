@@ -281,6 +281,44 @@ Two producers have been measured under a confining mode:
    cause that [`#8193`] measures to be false; the single-cause sentence is gone,
    and a test arm keeps it gone.
 
+   **The remedy is the host, and 0.7.1 says so in that order.** [`#8193`] did not
+   only split the producer — it measured the way out: hosted on the desktop's own
+   bundled standalone node
+   (`resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, v24.21.0)
+   the *same* confined `pwsh.exe` / `cmd.exe` spawns succeed (exit 81 / 82), with
+   workspace, temp directory, mode, SIDs, target and runner `sha256` all held
+   constant. The advisory now leads the Electron branch with that, and demotes
+   `danger-full-access` to what it actually is — a way to **confirm** the
+   diagnosis, not a fix, and on this platform one that silently removes the
+   sandbox from every shell call. The reporter's own reason is the one the plugin
+   repeats: *"the practical effect is that Windows Desktop users must escalate to
+   full access for all shell work, which silently removes the sandbox on that
+   platform"*, and they asked explicitly that this not be "fixed" with
+   `--disable-sandbox` / `--disable-gpu-sandbox` — those disable Chromium's
+   renderer sandbox, a different layer from the DSH file policy. The advisory also
+   warns off the opposite-looking move: unsetting `ELECTRON_RUN_AS_NODE` does not
+   help, because the desktop's runner **is** that Electron binary and without the
+   variable it cannot execute `runner.js` at all — the interaction [`#8193`]
+   records with [`#8174`], where a fix that tombstones the variable in the shared
+   child environment would take the ACL runner down with it, so the two changes
+   have to land together.
+
+   **What the flag vocabulary actually is.** The backend's own source records one
+   inherent boundary: *"console isolation is unavailable — children share the host
+   console (`CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE` children die with
+   `STATUS_DLL_INIT_FAILED` under the restriction)"*
+   (`packages/sandbox/sandbox-windows-acl/src/index.ts`), echoed at
+   `packages/subprocess/win32-process/src/process.ts:454`. [`#8193`] refines that
+   recording instead of repeating it, and the refinement is worth keeping exact:
+   the restricted-token path spawns with **`CREATE_SUSPENDED` alone**
+   (`process.ts:537-545`) and the ordinary current-token path with
+   **`CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT`** (`process.ts:567`, i.e.
+   `0x404`); `CREATE_NO_WINDOW` (`0x08000000`) is **not a constant anywhere in
+   that source** — only those two comments name it at all. So the flags in use are
+   a necessary-but-insufficient ingredient: the same flags that are fatal under an
+   Electron host succeed under a real-node host, and the host process image is
+   what turns them fatal.
+
 **Why this family is read from a successful result.** The producer never marks
 it an error, and that is a fact about upstream rather than a choice here:
 `RUNNER_FAILURE_RULES['windows-acl']` admits exactly one code —
@@ -539,7 +577,7 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.7.0` re-ran all five lines above. A line whose probe fails is
+the plugin, so `0.7.1` re-ran all five lines above. A line whose probe fails is
 removed from the range rather than left claimed. The scratch tree's resolved
 versions are the ones to read back when a probe is quoted as evidence — the probe
 script pins them by exact version, and `--keep` leaves the tree in place to check.
@@ -590,3 +628,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
 [#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193
+[#8174]: https://github.com/deepseek-ai/deepseek-harness/discussions/8174

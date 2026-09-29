@@ -166,6 +166,31 @@ const MUTATIONS = [
     edits: [["    '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',", "    '     From inside the session the two are one finding:',"]],
   },
   {
+    // The defect 0.7.1 exists to remove: the Electron reader was sent to a
+    // widened mode, which on that platform removes the sandbox from every shell
+    // call — and #8193 measured the real fix (a node host) while asking that it
+    // be the one offered.
+    name: 'the Electron remedy loses the host that fixes it and falls back to naming a wider mode',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["          '     `resources/runtime/primary-runtime/dependencies/node/bin/node.exe`, and the unpacked',", "          '     run the same command with `danger-full-access`, and the unpacked',"]],
+  },
+  {
+    name: 'the warning that unsetting ELECTRON_RUN_AS_NODE breaks the desktop runner is dropped',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "          '     platform it silently removes the sandbox from every shell call. Do not unset `ELECTRON_RUN_AS_NODE`',\n          '     instead either — the desktop runner IS that Electron binary, so without it `runner.js` cannot',\n          '     execute at all (#8193 records this interaction with #8174).',",
+      "          '     platform it silently removes the sandbox from every shell call.',",
+    ]],
+  },
+  {
+    name: 'the honest boundary repeats the console-window limitation instead of refining it with the measured flags',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'refines that recording rather than repeating it: `CREATE_NO_WINDOW` is not among the flags actually passed',", "    'repeats that recording: a child created with `CREATE_NO_WINDOW` dies this way,',"]],
+  },
+  {
     name: 'the advisory asserts one producer instead of enumerating the measured two',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',

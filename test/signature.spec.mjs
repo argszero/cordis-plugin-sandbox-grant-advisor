@@ -566,10 +566,14 @@ test('the Electron fact is reported, so the same code reads differently on the t
   assert.equal(head(onElectron), head(offElectron))
   assert.equal(tail(onElectron), tail(offElectron))
   // Each branch ends with a next step rather than a dead end: the Electron host
-  // gets the report's own discriminator, the other one is told the failure is
-  // outside both measured producers.
-  assert.match(onElectron.replace(/\s+/g, ' '), /run the same command with `danger-full-access`/)
-  assert.match(onElectron.replace(/\s+/g, ' '), /unpacked `node apps\/cli\/lib\/bin\.js web`/)
+  // is sent to a real node host — the fix #8193 measured, and the one the
+  // reporter asked for — while the other one is told the failure is outside
+  // both measured producers.
+  const flatOn = onElectron.replace(/\s+/g, ' ')
+  assert.match(flatOn, /dependencies\/node\/bin\/node\.exe/, 'the desktop\'s own standalone node is named')
+  assert.match(flatOn, /unpacked `node apps\/cli\/lib\/bin\.js web`/)
+  assert.match(flatOn, /`danger-full-access` only CONFIRMS the diagnosis/)
+  assert.doesNotMatch(flatOn, /run the same command with `danger-full-access`/, 'the widened mode is no longer the remedy offered')
   assert.match(offElectron.replace(/\s+/g, ' '), /outside both measured producers/)
   // With no explicit answer the plugin asks the live process, which on the host
   // this suite runs on is not Electron — and says so rather than staying silent.
@@ -608,6 +612,21 @@ test('the Electron host names both of its measurements instead of asserting the 
   assert.match(onElectron, /that — the host, not the flags — is the discriminator/)
   assert.doesNotMatch(onElectron, /the runner never ran/)
   assert.doesNotMatch(onElectron, /the runner never runs/)
+  // The remedy is the host, so the reader is warned off the one "fix" that would
+  // break the desktop host entirely: `ELECTRON_RUN_AS_NODE` is what makes the
+  // Electron binary able to run `runner.js` at all, which is the interaction
+  // `#8193` records with `#8174`.
+  assert.match(onElectron, /Do not unset `ELECTRON_RUN_AS_NODE`/)
+  assert.match(onElectron, /without it `runner\.js` cannot execute at all/)
+  assert.match(onElectron, /#8193 records this interaction with #8174/)
+  // The honest boundary repeats the backend's own recording of the console-window
+  // limitation and then refines it, because `#8193` measured that the flags in use
+  // are not the one that recording names.
+  const boundary = advisoryText(failure, { mode: 'workspace-write', electronHost: false }).replace(/\s+/g, ' ')
+  assert.match(boundary, /`CREATE_NO_WINDOW` is not among the flags actually passed/)
+  assert.match(boundary, /`CREATE_SUSPENDED`/)
+  assert.match(boundary, /necessary ingredient and the host process image is what turns it fatal/)
+  assert.doesNotMatch(boundary, /which is why that backend avoids `CREATE_NO_WINDOW`/)
 })
 
 test('the native-init advisory refuses to be built without the mode it explains', () => {
