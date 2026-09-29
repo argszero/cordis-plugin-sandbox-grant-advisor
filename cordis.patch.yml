@@ -1,8 +1,9 @@
 # The @argszero/cordis-plugin-sandbox-grant-advisor bundle patch: mount and go.
 #
-# Three reports (#7538, #7622, #7646) describe one Windows failure with no way
-# forward: the host-side write grant for a sandboxed workspace cannot be
-# applied, so every sandboxed command fails before it runs with
+# Twelve reports (#7538, #7622, #7646, #7720, #7750, #7735, #7771, #7804,
+# #7816, #8232, #8272, #8275) describe one Windows failure with no way forward:
+# the host-side write grant for a sandboxed workspace cannot be applied, so
+# every sandboxed command fails before it runs with
 #
 #   SetNamedSecurityInfoW failed (Win32 5): grantWrite(<workspace>)
 #
@@ -24,8 +25,25 @@
 #     (the manifest half of the merged DACL+SACL write is what needs it);
 #   - the directory's own ACL is the discriminator (`icacls <dir>`, looking for
 #     an ACE that names your SID with (F));
-#   - the remedy is one unelevated line:
-#       icacls "<dir>" /grant "$env:USERNAME:(OI)(CI)F"
+#   - the remedy is one unelevated line, forked on ownership because one command
+#     cannot serve both rights situations — the advisory hands over the check
+#     (`(Get-Acl "<dir>").Owner`) rather than guessing:
+#       icacls "<dir>" /grant "$env:USERNAME:(OI)(CI)(WO)"
+#     with Full control (`F`) offered second as the same line with more than it
+#     needs, and an elevated grant for a directory the caller does not own (where
+#     `icacls /grant` is itself refused for want of WRITE_DAC);
+#   - two version boundaries the error cannot carry: the mandatory label — and
+#     with it the SACL — arrives in `0.1.7-alpha.1` (up to `0.1.6-alpha.x` the
+#     apply touched the DACL only), and the backend's own
+#     `diagnose-windows-sandbox-acl` repair arrives with the `0.2.0` line. Neither
+#     makes downgrading a fix, and repairing the `0.1.7` file list is not a thing
+#     that can be done — there is nothing in that release to list.
+#
+# The advisory also says why a "weaker grant" is not a smaller version of the
+# same one, because that is the next idea the diagnosis invites: the label rides
+# the SAME SetNamedSecurityInfoW as the DACL (no DACL-only apply path exists), and
+# the confined token is itself lowered to Low, so the directory's Low label is
+# what lets that child write there at all.
 #
 # Optional config:
 #
