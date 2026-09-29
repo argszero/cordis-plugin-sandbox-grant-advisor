@@ -270,6 +270,101 @@ const MUTATIONS = [
     arms: 'packaging.spec.mjs',
     edits: [['(#7638, #8322)', '(#8322)']],
   },
+  {
+    name: 'the mount instructions drop the fourth family\'s thread',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [["the FIRST one's backend (#423)", "the FIRST one's backend"]],
+  },
+  {
+    // 0.11.0's family is the only Windows-only one that cannot drop its platform
+    // gate: what it explains is ACE inheritance, and the same stamped value on a
+    // Landlock/Seatbelt/bwrap host is a different story with no missed
+    // propagation to repair.
+    name: 'the workspace-denial classifier drops its platform gate',
+    file: 'src/signature.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["  if (facts.platform !== 'win32') return undefined", '  /* the platform is not checked */']],
+  },
+  {
+    name: 'the Windows fact is checked after the policy lookup, so every host pays for a family it cannot have',
+    file: 'src/index.ts',
+    arms: 'workspace-denial.spec.mjs',
+    edits: [['if (process.platform === \'win32\' && hasWorkspaceDenialStamp(result.value)) {', 'if (hasWorkspaceDenialStamp(result.value)) {']],
+  },
+  {
+    name: 'a denial is read from any mode, so a read-only refusal is advised as a broken grant',
+    file: 'src/signature.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['  return mode === DENIAL_MODE && denied === true && runnerFailed !== true', '  return denied === true && runnerFailed !== true']],
+  },
+  {
+    // The executor refuses to call a run denied when the runner itself failed, and
+    // this plugin must refuse it too: advising a missing inherited grant there
+    // would name a cause the value explicitly excludes.
+    name: 'the runner-failure exclusion is dropped, so a broken runner reads as a broken grant',
+    file: 'src/signature.ts',
+    arms: 'workspace-denial.spec.mjs',
+    edits: [['  return mode === DENIAL_MODE && denied === true && runnerFailed !== true', '  return mode === DENIAL_MODE && denied === true']],
+  },
+  {
+    // The narrowing that separates this family from the SANCTIONED escalation
+    // path: a denial of a path outside the workspace is the sandbox working.
+    name: 'the containment test is dropped, so the designed escalation path is advised as a broken grant',
+    file: 'src/signature.ts',
+    arms: 'workspace-denial.spec.mjs',
+    edits: [['  if (!named.every(path => isInsideWorkspace(facts.workspaceRoot, path))) return undefined', '  /* containment is not checked */']],
+  },
+  {
+    // The disclosure rule: a root the resolver cannot report is a decision the host
+    // log has to account for, or silence reads as "the sandbox is not the cause".
+    name: 'an unresolvable workspace root is withheld silently instead of disclosed',
+    file: 'src/index.ts',
+    arms: 'workspace-denial.spec.mjs',
+    edits: [["    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, 'workspace-denial')", '    if (!resolution.ok) return undefined']],
+  },
+  {
+    // The discriminator's second half, which a check on the ACE alone gets wrong.
+    name: 'the two-sided reachability rule is replaced by a single-sided one',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  THE TRAP: reading and listing go through the NORMAL token, writing and deleting through the RESTRICTED',",
+      "    '  The check is done when `icacls` shows the capability SID, because reading and listing go through the NORMAL',",
+    ]],
+  },
+  {
+    // From inside a session the DACL variant and the label variant are
+    // indistinguishable, and a reader who repairs the wrong half has learned
+    // nothing — so the second measured variant cannot be dropped.
+    name: 'the label variant of the same shape is dropped, leaving only the DACL half',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    // The whole block, not its first line: the variant is four sentences (what is
+    // missing, where it was reported, that the two are indistinguishable from
+    // inside, and the skill that separates them), and a mutation that removes only
+    // the first leaves the other three asserting the same fact — which is exactly
+    // what the first version of this arm did, and why it read SILENT.
+    edits: [[
+      "    '  A SECOND measured variant has the same shape and a different object: the coverage that is missing can be the',\n"
+      + "    '  mandatory-integrity LABEL rather than a DACL entry. It was reported in this same thread on 2026-09-29 against a',\n"
+      + "    '  `0.2.0-rc.1` install, under the same root-only short-circuit. Inside a session the two are indistinguishable;',\n"
+      + "    '  from outside, the repository\\'s own diagnosis skill separates them — `diagnose-windows-sandbox-acl` (0.2.0 and',\n"
+      + "    '  later) reports `hasExactDeny()` for the DACL half and `LOW_LABEL` (`S-1-16-4096`) for the label half.',",
+      "    '  There is nothing else to check here: the DACL half is the whole of this failure.',",
+    ]],
+  },
+  {
+    // The 0.5.0 precedent: an unverified repair command is the defect this plugin
+    // exists to answer, and this family has no Windows host behind it at all.
+    name: 'the advisory ships the repair command it says it cannot verify',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  No repair command is printed here on purpose. This project has no Windows host to verify one on, and shipping',",
+      "    '  Repair it from an elevated prompt: `icacls \"<dir>\" /grant \"<account>:(OI)(CI)F\"`. This project has no Windows host to verify one on, and shipping',",
+    ]],
+  },
 ]
 
 let silent = 0

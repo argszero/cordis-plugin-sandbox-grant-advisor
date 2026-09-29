@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
-import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS } from '../lib/advice.js'
+import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
@@ -191,12 +191,12 @@ test('the shipped bundle patch describes the family the advice module covers, an
   for (const id of tracked) {
     assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
   }
-  // All three families, not only the first: the patch documents what the plugin
+  // All four families, not only the first: the patch documents what the plugin
   // recognizes, and a family whose threads are missing from it is a family the
   // mount instructions do not admit exists. The last release that added threads
   // to the second and third families left this file behind for exactly that
   // reason — only the first list was wired to an assertion.
-  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS]]) {
+  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS]]) {
     for (const id of discussions.match(/#\d+/g) ?? []) {
       assert.ok(patch.includes(id), `the bundle patch never names ${id} (${name}), which the advisories cover`)
     }

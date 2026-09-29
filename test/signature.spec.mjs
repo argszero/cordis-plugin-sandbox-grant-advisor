@@ -19,15 +19,28 @@ import {
   NATIVE_INIT_DISCUSSIONS,
   PREREQUISITE,
   PTY_DISCUSSIONS,
+  WORKSPACE_DENIAL_DISCUSSIONS,
 } from '../lib/advice.js'
 import {
   classifyNativeInitDeath,
   classifyProvisioningFailure,
   classifyPtyStartupFailure,
+  classifyWorkspaceDenial,
   failureLine,
+  hasWorkspaceDenialStamp,
+  isInsideWorkspace,
   STATUS_DLL_INIT_FAILED,
+  windowsPathsIn,
 } from '../lib/signature.js'
-import { foreground, MSYS2_STDERR, NATIVE_DEATH } from './foreground.mjs'
+import {
+  denied,
+  foreground,
+  INSIDE,
+  MSYS2_STDERR,
+  NATIVE_DEATH,
+  OUTSIDE,
+  WORKSPACE_ROOT,
+} from './foreground.mjs'
 
 /** The exact text reported in #7538 / #7622 / #7646. */
 const REPORTED = 'SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'
@@ -845,4 +858,193 @@ test('the three families share no message: each producer\'s input reaches exactl
   assert.equal(classifyNativeInitDeath(PTY_EXIT), undefined)
   assert.equal(classifyProvisioningFailure('[exit code: -1073741502]'), undefined)
   assert.equal(classifyPtyStartupFailure('[exit code: -1073741502]'), undefined)
+})
+
+test('the path literals are recovered from the command, and only the ones a shell can carry', () => {
+  // Windows shells spell an absolute path two ways, and the second is the one a
+  // drive-letter regex alone misses.
+  assert.deepEqual(windowsPathsIn('cmd /c "mkdir D:\\ws\\logs"'), ['D:\\ws\\logs'])
+  assert.deepEqual(windowsPathsIn('copy \\\\server\\share\\f.txt .'), ['\\\\server\\share\\f.txt'])
+  // A trailing separator is not part of the path for comparison; a path named
+  // twice is one path.
+  assert.deepEqual(windowsPathsIn('x D:\\ws\\ D:/ws D:\\ws'), ['D:\\ws', 'D:/ws'])
+  // Case and separator are the caller's, not the parser's: normalising here would
+  // hide a difference the containment test is supposed to decide.
+  assert.deepEqual(windowsPathsIn('touch "C:\\Users\\a\\x.log"; ls /tmp/x'), ['C:\\Users\\a\\x.log'])
+  // Relative paths are not paths this family can key on — the plugin cannot say
+  // what they resolve to, and silence is the fail-closed direction.
+  assert.deepEqual(windowsPathsIn('mkdir logs && cat ./logs/app.log'), [])
+  // A path containing a space is recovered as its first segment: a PREFIX of the
+  // real path, which keeps the containment answer for any descendant of the root.
+  assert.deepEqual(windowsPathsIn('cp C:\\Program Files\\x.exe .'), ['C:\\Program'])
+})
+
+test('containment folds case and separators, and never by prefix of a sibling name', () => {
+  assert.equal(isInsideWorkspace('D:\\ws', 'D:\\ws'), true, 'the root itself is inside it')
+  assert.equal(isInsideWorkspace('D:\\ws', 'D:\\ws\\logs\\app.log'), true)
+  assert.equal(isInsideWorkspace('D:\\ws', 'd:/WS/Logs/App.Log'), true, 'Windows compares these equal')
+  assert.equal(isInsideWorkspace('D:\\ws\\', 'D:\\ws\\a'), true, 'a trailing separator on the root is not a difference')
+  // The near-miss that a `startsWith` without the separator would call inside.
+  assert.equal(isInsideWorkspace('D:\\ws', 'D:\\ws-other\\a'), false)
+  assert.equal(isInsideWorkspace('D:\\ws', 'C:\\ws\\a'), false, 'another volume is another root')
+  assert.equal(isInsideWorkspace('D:\\ws', 'D:\\wsx'), false)
+  assert.equal(isInsideWorkspace('', 'D:\\ws\\a'), false, 'an unknown root contains nothing')
+})
+
+test('the denial stamp is read from the executors\' own projection, and only there', () => {
+  assert.equal(hasWorkspaceDenialStamp(denied()), true)
+  // Everything the producers do NOT stamp is refused, one field at a time.
+  assert.equal(hasWorkspaceDenialStamp(denied({ denied: false })), false)
+  assert.equal(hasWorkspaceDenialStamp(denied({ mode: 'read-only' })), false, 'read-only denies every write by construction')
+  assert.equal(hasWorkspaceDenialStamp(denied({ mode: 'danger-full-access' })), false)
+  assert.equal(hasWorkspaceDenialStamp(denied({ runnerFailed: true })), false, 'a runner failure is not a denial the sandbox chose')
+  assert.equal(hasWorkspaceDenialStamp(foreground(1)), false, 'a shell projection without the stamp')
+  assert.equal(hasWorkspaceDenialStamp({ kind: 'background', exitCode: 1 }), false)
+  // A command's own output cannot fabricate it: the stamp is a field, not a line.
+  assert.equal(hasWorkspaceDenialStamp('sandbox: { mode: "workspace-write", denied: true }'), false)
+  assert.equal(hasWorkspaceDenialStamp({ kind: 'foreground', sandbox: 'denied' }), false)
+  assert.equal(hasWorkspaceDenialStamp(null), false)
+  assert.equal(hasWorkspaceDenialStamp([denied()]), false)
+})
+
+test('a denial inside the workspace is recognized, with the paths and the root kept', () => {
+  const failure = classifyWorkspaceDenial(
+    denied(),
+    { command: `cmd /c "type ${INSIDE}"` },
+    { platform: 'win32', workspaceRoot: WORKSPACE_ROOT },
+  )
+  assert.ok(failure, 'the reported combination must classify')
+  assert.equal(failure.family, 'workspace-denial')
+  assert.equal(failure.mode, 'workspace-write')
+  assert.equal(failure.exitCode, 1)
+  assert.deepEqual(failure.paths, [INSIDE])
+  assert.equal(failure.workspaceRoot, WORKSPACE_ROOT)
+  // The line the advisory shows is the producer's stamp, not a sentence this
+  // plugin made up: the reader can match it against the result they saw.
+  assert.equal(failureLine(failure), '[exit code: 1] sandbox: { mode: "workspace-write", denied: true }')
+})
+
+test('every narrowing that keeps a denial from being this family is a refusal, not a guess', () => {
+  const facts = { platform: 'win32', workspaceRoot: WORKSPACE_ROOT }
+  const at = (args, value = denied()) => classifyWorkspaceDenial(value, args, facts)
+  // The platform gate cannot be dropped here: the mechanism is ACE inheritance,
+  // which no other backend has.
+  assert.equal(classifyWorkspaceDenial(denied(), { command: `type ${INSIDE}` }, { ...facts, platform: 'darwin' }), undefined)
+  assert.equal(classifyWorkspaceDenial(denied(), { command: `type ${INSIDE}` }, { ...facts, platform: 'linux' }), undefined)
+  // A path outside the workspace is the DESIGNED escalation path.
+  assert.equal(at({ command: `"${OUTSIDE}" --version` }), undefined)
+  // A command naming any outside path as well is refused rather than guessed at:
+  // the plugin cannot say which of the two the sandbox refused.
+  assert.equal(at({ command: `"${OUTSIDE}" --version && type ${INSIDE}` }), undefined)
+  // Only relative paths: no literal to test, so nothing is claimed.
+  assert.equal(at({ command: 'mkdir logs && cat logs/app.log' }), undefined)
+  assert.equal(at({ command: 'echo hello' }), undefined)
+  assert.equal(at({}), undefined, 'arguments without a command string')
+  assert.equal(at({ command: 42 }), undefined)
+  // The other narrowings, which live in the stamp.
+  assert.equal(at({ command: `type ${INSIDE}` }, denied({ denied: false })), undefined)
+  assert.equal(at({ command: `type ${INSIDE}` }, denied({ mode: 'read-only' })), undefined)
+  assert.equal(at({ command: `type ${INSIDE}` }, denied({ runnerFailed: true })), undefined)
+  assert.equal(at({ command: `type ${INSIDE}` }, foreground(1)), undefined)
+  // An exit the tool did not report stays "not reported" rather than becoming 0.
+  const noExit = denied()
+  delete noExit.exitCode
+  const failure = at({ command: `type ${INSIDE}` }, noExit)
+  assert.ok(failure)
+  assert.equal(failure.exitCode, null)
+  assert.equal(failureLine(failure), 'sandbox: { mode: "workspace-write", denied: true }')
+})
+
+test('the workspace-denial advisory shows its work, and prints no repair command', () => {
+  const failure = classifyWorkspaceDenial(
+    denied(),
+    { command: `cmd /c "type ${INSIDE}"` },
+    { platform: 'win32', workspaceRoot: WORKSPACE_ROOT },
+  )
+  assert.ok(failure)
+  const flat = advisoryText(failure, { tool: 'bash' }).replace(/\s+/g, ' ')
+  // What is being claimed, and the two strings it is a claim about — printed, so
+  // the reader audits the plugin's own reasoning.
+  assert.match(flat, /Denied inside your own workspace/)
+  assert.match(flat, new RegExp(INSIDE.replace(/\\/g, '\\\\')))
+  assert.match(flat, new RegExp(WORKSPACE_ROOT.replace(/\\/g, '\\\\')))
+  assert.match(flat, /The `bash` command ran under sandbox mode `workspace-write`/)
+  // The mechanism, and the reason retrying is provably useless.
+  assert.match(flat, /ACE inheritance/)
+  assert.match(flat, /WRITE_DAC/)
+  assert.match(flat, /hasExactGrant\(workspaceRoot\)/)
+  assert.match(flat, /NEVER revisited|never revisited/)
+  assert.match(flat, /Do NOT retry this call unchanged/)
+  // The measurement that says the shape is wider than "subdirectories".
+  assert.match(flat, /170 of 729/)
+  assert.match(flat, /INCLUDING root-level files/)
+  // The discriminator's second half: a check that only greps for the SID is wrong.
+  assert.match(flat, /THE TRAP/)
+  assert.match(flat, /NORMAL token/)
+  assert.match(flat, /RESTRICTED/)
+  assert.match(flat, /Administrators\/SYSTEM/)
+  // The label variant of the same shape, and the tool that separates them.
+  assert.match(flat, /mandatory-integrity LABEL/)
+  assert.match(flat, /2026-09-29/)
+  assert.match(flat, /diagnose-windows-sandbox-acl/)
+  assert.match(flat, /LOW_LABEL/)
+  assert.match(flat, /S-1-16-4096/)
+  assert.match(flat, /hasExactDeny\(\)/)
+  // The Windows ceiling that closes the obvious repair.
+  assert.match(flat, /ERROR_NONE_MAPPED \(1332\)/)
+  // The sanctioned retry is named, so the model is not nudged into it blind.
+  assert.match(flat, /offers one retry of this exact command under a wider mode/)
+  // And what it does not do: no repair line at all, for the reason the standing
+  // grant section gives, and no privilege-elevation vocabulary either.
+  assert.doesNotMatch(flat, /icacls "[^"]+" \/(grant|setowner)/, 'no repair command is printed')
+  assert.doesNotMatch(flat, /setintegritylevel/i)
+  assert.doesNotMatch(flat, /No repair command is printed here on purpose\s*$/)
+  assert.match(flat, /No repair command is printed here on purpose/)
+  assert.match(flat, /no Windows host to verify one on/)
+  // The stopgap line, and the boundary that says when it stays silent.
+  assert.match(flat, new RegExp(WORKSPACE_DENIAL_DISCUSSIONS))
+  assert.match(flat, /only when the mode is `workspace-write`, the host is Windows/)
+})
+
+test('the fourth family names itself, and borrows none of the other three stories', () => {
+  const denial = classifyWorkspaceDenial(
+    denied(),
+    { command: `type ${INSIDE}` },
+    { platform: 'win32', workspaceRoot: WORKSPACE_ROOT },
+  )
+  assert.ok(denial)
+  const text = advisoryText(denial, { tool: 'bash' })
+  assert.notEqual(text, advisoryText(classifyProvisioningFailure(REPORTED)))
+  assert.notEqual(text, advisoryText(classifyPtyStartupFailure(PTY_EXIT), { mode: 'read-only' }))
+  assert.notEqual(text, advisoryText(classifyNativeInitDeath(foreground(NATIVE_DEATH)), { mode: 'read-only' }))
+  // The ACL family's remedy belongs to the other end of the same backend and must
+  // not leak into this one: this family's own text says no command is printed.
+  assert.doesNotMatch(text, /\(Get-Acl/)
+  assert.doesNotMatch(text, /If you own it/)
+  // An href replaces the thread line, exactly as in the other families.
+  const linked = advisoryText(denial, { tool: 'bash', href: 'https://example.invalid/t/423' })
+  assert.match(linked, /tracked upstream: https:\/\/example\.invalid\/t\/423/)
+  assert.doesNotMatch(linked, /tracked upstream \(discussion/)
+  // Only the thread LINE moves. This family is one thread, so unlike the others
+  // its id is also the reference beside the measurements it quotes — and those
+  // citations are what a reader follows to check the numbers, so they stay.
+  assert.match(linked, new RegExp(`${WORKSPACE_DENIAL_DISCUSSIONS} measured 170 of 729`))
+})
+
+test('the four families share no message: each producer\'s input reaches exactly one classifier', () => {
+  const facts = { platform: 'win32', workspaceRoot: WORKSPACE_ROOT }
+  const stamped = denied()
+  assert.equal(classifyProvisioningFailure(PTY_EXIT), undefined)
+  assert.equal(classifyPtyStartupFailure(REPORTED), undefined)
+  // The two value-read families are not text-driven at all, and no value reaches
+  // the text-read ones.
+  assert.equal(classifyNativeInitDeath(REPORTED), undefined)
+  assert.equal(classifyNativeInitDeath(stamped, { command: `type ${INSIDE}` }), undefined)
+  assert.equal(classifyProvisioningFailure('[exit code: -1073741502]'), undefined)
+  assert.equal(classifyPtyStartupFailure('[exit code: -1073741502]'), undefined)
+  // The two value families are distinguished by the loader status alone: a denial
+  // value carries no such code, and a loader death carries no stamp.
+  assert.equal(classifyWorkspaceDenial(foreground(NATIVE_DEATH), { command: `type ${INSIDE}` }, facts), undefined)
+  assert.equal(classifyNativeInitDeath(stamped), undefined)
+  assert.equal(classifyWorkspaceDenial(stamped, { command: `type ${INSIDE}` }, facts)?.family, 'workspace-denial')
 })

@@ -3,7 +3,7 @@
  * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test, one family at a time. The three families are shaped by the same
+ * by a test, one family at a time. The four families are shaped by the same
  * question — is this the sandbox's doing, and what can the reader do about it —
  * and they answer it differently:
  *
@@ -112,6 +112,31 @@
  *   want of that variable. A withdrawn cause earns its sentence because this
  *   advisory shipped it twice; a confidently wrong cause is worse than two named
  *   ones with one shared remedy.
+ * - **The workspace-internal denial** (`workspace-denial`, #423) is the fourth,
+ *   and it is the first whose remedy is **withheld on purpose**. The failure is
+ *   not that a command failed but that the workspace's own grant does not cover
+ *   part of the workspace: the grant is written once on the root and depends on
+ *   ACE inheritance, so an already-existing object whose DACL the caller could
+ *   not write kept its older DACL, and the backend's root-only `hasExactGrant`
+ *   check means it is never revisited. Retrying is therefore provably useless,
+ *   which is what the text leads with. What it does **not** do is print a repair
+ *   command: the obvious one (`icacls` recursing the capability SID) is refused
+ *   by Windows itself with `ERROR_NONE_MAPPED` (1332), because that SID has no
+ *   name to map, and the line that would work needs the right that is missing —
+ *   so the advisory states the mechanism, names the ceiling, and says out loud
+ *   that it prints no command because this project has no Windows host to verify
+ *   one on. That is the same standard the standing-grant section is held to, and
+ *   it is the reason this family can be useful without being prescriptive.
+ *   Its discriminator is the **two-sided** one, which is not obvious and which a
+ *   reader checking only the ACE would get wrong: reading and listing use the
+ *   normal token while writing and deleting use the restricted one, so an object
+ *   whose DACL names only `Administrators`/`SYSTEM` plus the capability SID is
+ *   refused on the read side too and looks granted to a grep for the SID
+ *   (#423 measured it). The variant that would otherwise be missed gets its own
+ *   sentence as well — the same shape with the missing coverage on the mandatory
+ *   label instead of the DACL (reported 2026-09-29 in the same thread), which is
+ *   indistinguishable from inside a session and separable by the repository's own
+ *   diagnosis skill.
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -126,11 +151,17 @@
  * wrong remedy. Inside that Electron answer there is a third thing the code
  * cannot separate, and the advisory deliberately does not try: it names both
  * measurements and says the remedy does not depend on choosing between them.
+ * For the workspace-denial family the discriminator is the **path**, which is
+ * why the advisory prints the path it keyed on beside the root it tested it
+ * against: the reader can audit the plugin's own reasoning instead of taking a
+ * claim about two strings on faith. That family's check is also the one place
+ * where a single fact is not enough — reachability has two sides, and the text
+ * says which one a check on the ACE alone would miss.
  *
  * @module
  */
 
-import type { ProvisioningFailure, PtyStartupFailure, NativeInitFailure, RecognizedFailure } from './signature.js'
+import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, WorkspaceDenialFailure, RecognizedFailure } from './signature.js'
 import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
@@ -165,6 +196,35 @@ export const PTY_DISCUSSIONS = '#7638 / #8322'
  * now names.
  */
 export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313'
+
+/**
+ * The upstream thread the workspace-denial advisory is a stopgap for.
+ *
+ * One thread, because this family is one report and its own follow-up: `#423`
+ * is the failure and its measurements (170 of 729 objects missing the grant,
+ * root-level files among them, and the two-sided reachability rule), and the
+ * second comment in that thread is the mandatory-label variant of the same
+ * shape.
+ */
+export const WORKSPACE_DENIAL_DISCUSSIONS = '#423'
+
+/**
+ * The thread list each family's withholding note cites.
+ *
+ * A withheld recognition is a decision the host log has to account for, and the
+ * note a maintainer reads is only useful if it points at *that* family's
+ * report — a withheld native-init death and a withheld workspace denial are
+ * different reports, and a note that cites the wrong one is its own small
+ * misdiagnosis. Kept beside the constants it assembles rather than at the
+ * withholding site, so a family added without a thread is a type error instead
+ * of a note that quietly cites another family's.
+ */
+export const DISCUSSIONS_OF: Record<FailureFamily, string> = {
+  'acl-provisioning': ACL_DISCUSSIONS,
+  'pty-startup': PTY_DISCUSSIONS,
+  'native-init': NATIVE_INIT_DISCUSSIONS,
+  'workspace-denial': WORKSPACE_DENIAL_DISCUSSIONS,
+}
 
 /** The documented prerequisite, quoted from the backend's README. */
 export const PREREQUISITE = 'granted directories must be caller-owned and grant `WRITE_OWNER`'
@@ -489,6 +549,7 @@ export function advisoryText(failure: RecognizedFailure, context: AdvisoryContex
     }
     return nativeInitAdvisory(failure, context.mode, context.electronHost ?? electronHost(), context.href)
   }
+  if (failure.family === 'workspace-denial') return workspaceDenialAdvisory(failure, context.tool, context.href)
   return aclAdvisory(failure, context.href)
 }
 
@@ -760,6 +821,118 @@ function ptyAdvisory(failure: PtyStartupFailure, mode: SandboxModeName, tool?: s
     'How to read this: the failure names no cause and points at no remedy, so the diagnosis is delivered here instead.',
     'This is a stopgap, ' + where + '. Unless the mode is `danger-full-access`, this plugin stays silent, because a',
     'shell can fail to start for other reasons and a confident wrong cause is worse than no answer.',
+  ].join('\n')
+}
+
+/**
+ * Build the advisory for a confined command that was denied a path inside its
+ * own workspace.
+ *
+ * Four things this text must do, and one it must not. It must lead with the
+ * fact that **retrying is provably useless** (the backend's provisioning check
+ * short-circuits on the root, so the object that missed the propagation is never
+ * revisited) — that is the whole reason the model needs telling rather than
+ * discovering. It must show the **path it keyed on and the root it tested it
+ * against**, because the family's claim is a statement about two strings and the
+ * reader is entitled to audit it. It must give the **two-sided** reachability
+ * rule, since a check that only looks for the capability ACE reports an object
+ * as granted when the read side is refused as well. And it must name the
+ * **label variant** of the same shape, because from inside a session the two are
+ * indistinguishable and a reader who repairs the wrong half has learned
+ * nothing.
+ *
+ * What it must not do is print a repair command. The obvious one is refused by
+ * Windows with `ERROR_NONE_MAPPED` (1332) — a capability SID has no name for
+ * `icacls` to map — and the one that would work needs `WRITE_DAC` on the object,
+ * which is the right in question. This project has no Windows host to verify a
+ * line on, and the standing-grant section of the ACL advisory is held to the
+ * same standard for the same reason: an unverified remedy delivered confidently
+ * is the defect this plugin exists to answer. The mechanism is stated instead,
+ * and the reader is told why the command is absent.
+ * @param failure - the recognized failure.
+ * @param tool - the tool whose call was denied, when the caller knows it.
+ * @param href - optional URL shown for the upstream thread.
+ * @returns the user-role notice text.
+ */
+function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string, href?: string): string {
+  const where = href === undefined
+    ? `tracked upstream (discussion ${WORKSPACE_DENIAL_DISCUSSIONS})`
+    : `tracked upstream: ${href}`
+  const call = tool === undefined ? 'This command' : `The \`${tool}\` command`
+  const subject = failure.paths[0] ?? '<the path from the error line above>'
+  return [
+    'Denied inside your own workspace — the workspace grant does not reach that part of the tree, and retrying cannot repair it.',
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}`,
+    `${call} ran under sandbox mode \`${failure.mode}\`, where a write INSIDE the workspace is supposed to succeed, and every`,
+    'path it named is inside this session\'s workspace:',
+    ...failure.paths.map(path => `  ${path}`),
+    `  (workspace root: ${failure.workspaceRoot})`,
+    'So this is not the sandbox declining work that belongs outside the workspace. It is the workspace\'s own grant',
+    'failing to cover an object inside it, which is why every command touching that object fails the same way.',
+    '',
+    'Why — and why retrying cannot fix it:',
+    '  The host-side grant is written ONCE, on the workspace ROOT, and relies on Windows ACE inheritance to reach',
+    '  everything beneath it. Writing an inherited ACE into an ALREADY-EXISTING child needs WRITE_DAC on that child;',
+    '  where the caller does not hold it, Windows skips the child silently — no error, no return value, no log line.',
+    '  The backend then checks only the root (`hasExactGrant(workspaceRoot)`) and returns early when the grant is',
+    '  already there, which it is from the first call onwards. The descendants that missed the propagation are',
+    '  therefore never revisited — not later in this session, not in any later one — so the identical command keeps',
+    '  failing and there is no number of attempts that changes that',
+    '  (`packages/sandbox/sandbox-windows-acl/src/acl.ts`).',
+    '  WHICH objects miss it is a fact about who created them: objects the harness itself creates inherit the ACE,',
+    '  while objects that already existed or that another account or tool created (an installer, an editor, another',
+    '  agent harness running under its own account) are the ones the propagation skipped. #423 measured 170 of 729',
+    '  objects missing it, INCLUDING root-level files — so it is not only subdirectories, and "write it at the',
+    '  workspace root instead" is not a safe move either.',
+    '',
+    'Confirm it — this is the discriminator, and the second half is the part a single check gets wrong:',
+    `  icacls "${subject}"`,
+    'compared with the same command against the workspace root. The root carries an inheritable ACE for the workspace',
+    'capability SID — a `S-1-4-…` that `icacls` prints as an unresolved SID rather than a name — with Modify or Full',
+    'control; the failing object does not have it. Check each path listed above the same way; the first is shown here.',
+    '  THE TRAP: reading and listing go through the NORMAL token, writing and deleting through the RESTRICTED',
+    '  (low-integrity) one, and both sides must pass. An object whose DACL names only Administrators/SYSTEM plus the',
+    '  capability SID is refused on the read side as well, so it looks granted to a check that only searches for the',
+    '  capability SID — #423 measured exactly that on a `.cache` directory. A check that asks only "is the SID there?"',
+    '  reports those objects as fine while LIST and WRITE are both denied.',
+    '  A SECOND measured variant has the same shape and a different object: the coverage that is missing can be the',
+    '  mandatory-integrity LABEL rather than a DACL entry. It was reported in this same thread on 2026-09-29 against a',
+    '  `0.2.0-rc.1` install, under the same root-only short-circuit. Inside a session the two are indistinguishable;',
+    '  from outside, the repository\'s own diagnosis skill separates them — `diagnose-windows-sandbox-acl` (0.2.0 and',
+    '  later) reports `hasExactDeny()` for the DACL half and `LOW_LABEL` (`S-1-16-4096`) for the label half.',
+    '',
+    'Why the natural repair is closed — this is a Windows ceiling, not a mistake in the command:',
+    '  The grant the root carries is written for a capability SID, and a recursive `icacls /grant "*S-1-4-…:…" /T /C`',
+    '  is refused with ERROR_NONE_MAPPED (1332): the tool cannot map that SID to a name, so a grant that needs to name',
+    '  it never reaches the child. Widening the grant to a nameable account is a different grant with different',
+    '  consequences, not this one restored.',
+    '',
+    'What helps:',
+    '  - The move that is yours, and the only one available inside the session: write new files under a directory the',
+    '    harness itself created in this workspace. Those carry the grant, because their inheritance did apply — the',
+    '    reporter\'s own measurement, that objects DSH created are complete here and externally created ones are not.',
+    '  - The user\'s move: repair the specific object from an account that already holds WRITE_DAC on it, by writing',
+    '    the ACE the root carries into the child\'s own DACL. That needs the very right that is missing, so it is not',
+    '    something an unelevated prompt can do.',
+    '  No repair command is printed here on purpose. This project has no Windows host to verify one on, and shipping',
+    '  an unverified line would be the same defect this plugin exists to answer. The mechanism above is what is known;',
+    '  the line is yours to choose.',
+    '',
+    'The retry you are about to be offered: the denial surface offers one retry of this exact command under a wider',
+    'mode. That retry can only succeed by removing the confinement itself — it repairs nothing in the workspace, and',
+    'the next session meets the same gap. Take it only if that is what you mean to buy.',
+    '',
+    'Do NOT retry this call unchanged: the provisioning path short-circuits on the root grant, so the object that was',
+    'skipped is never revisited.',
+    '',
+    'How to read this: the denial names no cause and points at no repair, so the diagnosis is delivered here instead.',
+    'This is a stopgap, ' + where + '. This plugin speaks only when the mode is `workspace-write`, the host is',
+    'Windows, and every path the command names lies inside the workspace — a denial anywhere else is the sandbox',
+    'working as designed, and a confident wrong cause is worse than no answer.',
+    'What it is NOT: this plugin does not edit an ACL, does not elevate, and does not offer `danger-full-access` as a',
+    'fix.',
   ].join('\n')
 }
 

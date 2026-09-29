@@ -1,13 +1,15 @@
 # @argszero/cordis-plugin-sandbox-grant-advisor
 
 Turns a sandbox environment failure that has **no path forward** into a
-diagnosis the model — and the user reading the transcript — can act on. Three
+diagnosis the model — and the user reading the transcript — can act on. Four
 signatures, one mechanism:
 
 ```
 SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\ws)   # Windows workspace ACL
 PTY shell exited during startup                             # persistent shell × confining mode
 [exit code: -1073741502]  (0xC0000142)                      # a confined child that never started
+[exit code: 1]  sandbox: { mode: "workspace-write", denied: true }
+                                                            # denied INSIDE the workspace
 ```
 
 **This plugin is the stopgap for "the error does not name the outstanding
@@ -15,7 +17,7 @@ condition".** It repairs nothing: no ACL is written, no privilege is requested,
 nothing is elevated, no environment variable is set for another process, no
 preset is installed and no mode is changed.
 
-## The three failures it recognizes
+## The four failures it recognizes
 
 The first two are recognized on the public **`tools/post-execute`** waterfall
 (`@deepseek-ai/dsh-tools`) from the failure text. That seam is the one that has
@@ -24,9 +26,9 @@ all three of what a diagnosis needs: the failure
 `isError` result), an agent identity to attribute it to (`exec.agent`), and a
 channel that speaks to the model in the same step (`PostToolDecision`'s
 `additionalContexts`, which the agent loop turns into a durable user-role message
-— `packages/core/agent-loop/src/tool-calls.ts`). The third is recognized at the
-**same seam** from the canonical value of a result the pipeline calls a
-*success*, for a reason §3 gives in full.
+— `packages/core/agent-loop/src/tool-calls.ts`). The third and fourth are
+recognized at the **same seam** from the canonical value of a result the pipeline
+calls a *success*, for reasons §3 and §4 give in full.
 
 That seam, not `ctx.sandbox.confine`: `confine(argv, policy, signal)` sees the
 confinement failure too, but its signature carries no agent, so a wrapper could
@@ -621,6 +623,110 @@ the single shape that happened to be measured first. It never
 offers `danger-full-access` as a fix and never suggests a sandbox setting be
 relaxed.
 
+### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0)
+
+[#423] is one report and its own follow-up, and it is the **other end of the
+backend §1 is about**. There the workspace grant could not be applied at all and
+every command died before it ran; here the grant **was** applied — on the
+workspace root, once — and part of the tree still refuses writes, forever. The
+report's shape: under `workspace-write` on Windows, a command writing into a
+subdirectory that was created or **moved in from outside** the session (an
+installer, an editor, another harness running under its own account) is denied,
+while the same command against a directory the harness itself created succeeds.
+
+```
+[exit code: 1]  sandbox: { mode: "workspace-write", denied: true }
+```
+
+**The signature is a value, not a message**, and this family is invisible from
+the error path for the same structural reason §3 is: a denied command exits
+nonzero, and the shipped shell tools report a nonzero exit as a finished run
+rather than as `isError`
+(`packages/shell/tool-pwsh/src/render.ts` reports `[exit code: N]` and drops a
+denial marker). The fact therefore arrives in `ToolExecutionSuccess.value`,
+where `tool-bash` / `tool-pwsh` project what the sandbox executor stamped
+(`packages/shell/bash-sandbox/src/index.ts`, `pwsh-sandbox`): the mode the call
+actually ran under, whether the backend's own refusal dialect appears in the
+**captured stderr**, and the enforcement that applied. Reading the executors'
+own stamp rather than a sentence means this plugin is reporting the harness's
+reading of its own sandbox, not a guess about a line of output.
+
+**What the advisory says.** Four things, and one it refuses:
+
+- **That retrying is provably useless.** The host-side grant is written once, on
+  the workspace **root**, and relies on Windows ACE inheritance to reach the
+  tree beneath it. Writing an inherited ACE into an *already-existing* child
+  needs `WRITE_DAC` on that child; where the caller does not hold it, Windows
+  skips the child silently — no error, no return value, no log line. The backend
+  then checks only the root (`hasExactGrant(workspaceRoot)` in
+  `packages/sandbox/sandbox-windows-acl/src/acl.ts`) and returns early once the
+  grant is there, which it is from the first call onwards. The descendants that
+  missed the propagation are never revisited — not later in this session, not in
+  any later one.
+- **Which objects miss it, and how many.** It is a fact about *who created
+  them*: objects the harness creates inherit the ACE, and objects that already
+  existed do not. [#423] measured 170 of 729 objects missing it, **including
+  root-level files** — so "write at the workspace root instead" is not a safe
+  move either.
+- **The discriminator, and its second half.** The advisory prints the path it
+  keyed on beside the root it tested it against, so the reader can audit the
+  claim instead of taking a statement about two strings on faith. Then the
+  measurement a single check gets wrong: reading and listing use the **normal**
+  token while writing and deleting use the **restricted** (low-integrity) one,
+  and both sides must pass — so an object whose DACL names only
+  `Administrators`/`SYSTEM` plus the capability SID is refused on the read side
+  too, and looks fine to a check that merely greps for the capability SID.
+  [#423] measured exactly that on a `.cache` directory.
+- **The second measured variant of the same shape.** The coverage that is
+  missing can be the mandatory-integrity **label** rather than a DACL entry —
+  reported in the same thread on 2026-09-29, against a `0.2.0-rc.1` install,
+  under the same root-only short-circuit. From inside a session the two are
+  indistinguishable; from outside, the repository's own diagnosis skill
+  separates them (`diagnose-windows-sandbox-acl`, 0.2.0 and later, reports
+  `hasExactDeny()` for the DACL half and `LOW_LABEL` — `S-1-16-4096` — for the
+  label half).
+- **No repair command.** The obvious one, a recursive `icacls /grant` for the
+  capability SID, is refused by Windows itself with `ERROR_NONE_MAPPED` (1332) —
+  the tool cannot map that SID to a name, so a grant that must name it never
+  reaches the child. The line that *would* work needs `WRITE_DAC` on the object,
+  which is the right in question. The advisory states the mechanism, names the
+  ceiling, and says out loud that it prints no command because this project has
+  no Windows host to verify one on — the same standard §1's standing-grant
+  section is held to, and for the same reason.
+
+**What it refuses to explain, and why that is the design.** A denial is the
+*sanctioned* outcome in three other situations, and advising about a missing
+inherited grant in any of them would be a confidently wrong cause:
+
+- **Outside the workspace** — a confining sandbox denying a path outside its
+  writable roots is the whole point, and the denial surface's one-shot escalation
+  offer is correct there.
+- **Under `read-only`** — that mode denies every write by construction, so an
+  in-workspace denial under it is the mode working.
+- **A runner failure** — the executor refuses to call a run denied when the
+  runner itself failed, and such a value is left alone for the same reason.
+
+What is left is exactly the anomaly: a denial under `workspace-write` of a path
+inside the session's own workspace. That is why the family reads the mode off
+the **value** (the executor stamped the mode it actually ran under, so no policy
+lookup can disagree with it), tests containment against the root the policy
+resolver reports, and speaks only when **every** absolute path the command's own
+arguments name lies under that root. A command that names an outside path as
+well — an interpreter under `C:\Program Files`, an output directory on another
+volume — is refused rather than guessed at, and so is a command naming only
+relative paths: in both cases the plugin cannot say *which* path was denied, and
+silence is the fail-closed direction. The platform gate is real here and cannot
+be dropped: the mechanism is ACE inheritance, which no other backend has.
+
+**On a denial it cannot finish placing** — a root the policy resolver does not
+report, or no mounted policy service at all — the plugin withholds the advisory
+and says so once on the host log. That is the disclosure rule §1's mode gate
+follows as well: silence alone would make "the sandbox is not the cause"
+indistinguishable from "this plugin could not tell".
+
+[#423] is a Discussion (the repository has issues disabled), and the reply
+covering this family is posted there.
+
 ## What it does with a recognized failure
 
 1. **One durable advisory per agent, per family.** An agent that hits two
@@ -631,10 +737,12 @@ relaxed.
    `warn` line, so the fact survives outside the transcript too.
 2. **A disclosure when it withholds.** The PTY and native-init advisories are
    only sent when the
-   resolved mode actually confines. If the mode is `danger-full-access`, or
-   cannot be resolved at all (no `sandboxPolicy` service mounted, no agent
-   session, a resolver that throws), the failure is left exactly as it was
-   **and the host log says so once**. Silence alone would make "the sandbox is
+   resolved mode actually confines, and the workspace-denial advisory only when
+   the workspace root is resolvable — the fact its containment claim is tested
+   against. If the mode is `danger-full-access`, or either fact cannot be
+   resolved at all (no `sandboxPolicy` service mounted, no agent session, a
+   resolver that throws, a policy without a root), the failure is left exactly as
+   it was **and the host log says so once**. Silence alone would make "the sandbox is
    not the cause" and "this plugin could not tell" indistinguishable from the
    outside. Withholding is never a guess: an unresolvable mode is *not* an
    invitation to fall back to the deployment default.
@@ -649,8 +757,8 @@ relaxed.
    refused twice — while a session can always make progress by spending the
    budget it has.
 
-   **Why the blocking half does not extend to the two mode-gated families** (it
-   is ACL-only by construction, in the parameter type): the ACL remedy is a
+   **Why the blocking half covers one family only** (it is ACL-only by
+   construction, in the parameter type): the ACL remedy is a
    command
    the user can run *while the session continues*, so refusing further identical
    calls cannot make the session unfinishable — spending the budget always lets
@@ -659,8 +767,11 @@ relaxed.
    native-init remedy is a launch fix on the user's side — whose one in-session
    part, rewriting an MSYS2 command, the model does by calling a *different*
    command, which has a different call key and is therefore never the call being
-   refused. Refusing calls in those families could only pad a session that is
-   already unable to do the thing being refused.
+   refused. The workspace-internal denial is not covered either, and for a
+   stronger version of the same reason: its remedy is not a command at all — the
+   object was skipped when the grant was written and nothing revisited it — so
+   refusing calls could only pad a session that is already unable to do the thing
+   being refused.
 
 ## Install
 
@@ -734,6 +845,15 @@ than one that stays silent.
   `[exit code: -1073741502]`, or any value that is not the shipped shell
   projection (`kind: 'foreground'`), is not this family — a line of text can
   never be mistaken for a loader status.
+- **A denial is not this family unless the plugin can place it.** A denial under
+  `read-only`, under `danger-full-access`, or on a host that is not Windows; a
+  value the executor marked as a runner failure (`denied` is not set when the
+  runner itself failed); a command naming a path outside the workspace; a command
+  naming an outside path as well as an inside one; and a command naming only
+  relative paths — all six are refused, and the first three are the *sanctioned*
+  outcomes rather than puzzles. The plugin reads the executors' own stamp rather
+  than a sentence, so a command whose output contains `denied: true` is not this
+  family either.
 - **Only one advisory per agent, per family.** The environment is explained
   once; repeating it per failed command would be noise competing with the
   failure itself.
@@ -742,9 +862,11 @@ than one that stays silent.
 
 - **The Windows path itself cannot be witnessed on macOS**, where this plugin
   was built. What the test suite proves is the decision layer — classification
-  of all three families (the third from the producer's own canonical value,
+  of all four families (the third from the producer's own canonical value,
   built by the suite with the reported `-1073741502` and the report's stderr
-  line), the once-per-agent-per-family rule, the sandbox-mode gate
+  line; the fourth from the executors' own stamp, built by the suite with the
+  mode, the `denied` flag and the refusal dialect the executor matches), the
+  once-per-agent-per-family rule, the sandbox-mode gate
   and its fail-closed behaviour, the fail-fast budget and its self-feeding
   guard, and the wiring to a real cordis `Context` and the real `ToolRuntime` —
   driven by fixtures that throw the producers' exact error shapes
@@ -754,7 +876,14 @@ than one that stays silent.
   a given Windows host reproduces the PTY startup failure; those are the user's
   one-line experiment and the reporter's own control, and both advisories say
   where they stop. The native-init family is the one that needs no Windows to be
-  faithful, because what it reads is a number inside a JSON value.
+  faithful, because what it reads is a number inside a JSON value. The
+  workspace-denial family is exercised the same way and **does** need the
+  platform fact, which the suite supplies by stubbing `process.platform` for the
+  arms that need `win32` and restoring it — the plugin reads the real fact rather
+  than a config knob, because a knob would be a backdoor into a shipped decision.
+  What that proves is the decision layer against the producers' stamped values;
+  the ACE-inheritance path itself is still unwitnessed here, and the advisory
+  says as much by shipping no repair command.
 - **The standing-grant section is source-level, and the out-of-tree reach is the
   reporter's measurement.** What this section states about the backend's own
   behaviour — that the workspace grant is standing, that nothing in the dispose or
@@ -785,7 +914,7 @@ than one that stays silent.
   outside the seam this plugin subscribes to. The report and its proposed fix
   stay with the maintainers; all this plugin can do is explain the provisioning
   failure that shares its root.
-- **The real fix is upstream, in all three families.** For the ACL failure,
+- **The real fix is upstream, in all four families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
   a 52-minute detour into one line belongs at that site. For the PTY failure,
@@ -794,7 +923,12 @@ than one that stays silent.
   the runner should be launched with the environment its own execution needs
   (`ELECTRON_RUN_AS_NODE=1` when `argv[0]` is an Electron binary — [`#7876`]'s
   three candidate fixes) or refuse, in a checkable way, an MSYS2 program under a
-  restricted token. This plugin is the stopgap for all three.
+  restricted token. For the workspace-internal denial the site is the same
+  `grantWrite`: its early return asks only whether the **root** already carries
+  the ACE, so the descendants that missed the propagation are never repaired —
+  the check would have to look past the root, or the denial surface would have to
+  say *which* path was refused instead of only that one was. This plugin is the
+  stopgap for all four.
 
 ## Compatibility
 
@@ -885,6 +1019,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
 [discussion #8208]: https://github.com/deepseek-ai/deepseek-harness/discussions/8208
+[#423]: https://github.com/deepseek-ai/deepseek-harness/discussions/423
 [#7750]: https://github.com/deepseek-ai/deepseek-harness/discussions/7750
 [#7771]: https://github.com/deepseek-ai/deepseek-harness/discussions/7771
 [#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804

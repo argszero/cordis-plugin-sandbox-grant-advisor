@@ -38,7 +38,11 @@ export const PTY_EXIT = 'PTY shell exited during startup'
 
 // The native-init family's producer shape lives in its own module, so the pure
 // arms can pin it without mounting this harness.
-export { NATIVE_DEATH, MSYS2_STDERR, foreground } from './foreground.mjs'
+export { NATIVE_DEATH, MSYS2_STDERR, foreground, denied, WORKSPACE_ROOT, INSIDE, OUTSIDE } from './foreground.mjs'
+
+// Imported as well as re-exported: the policy stand-in below answers with the
+// root, and an `export … from` does not put a binding in this module's scope.
+import { WORKSPACE_ROOT } from './foreground.mjs'
 
 /** How many tool bodies actually ran, per fixture name. */
 const ran = new Map()
@@ -158,10 +162,14 @@ export function whoWithoutSession(id) {
  * A `sandboxPolicy` stand-in.
  *
  * Shaped like the real service where it matters — `resolve({ session })`
- * returns a policy carrying the mode — and unlike it everywhere else, so a
- * suite can make it lie, throw, or hand back a value that is not a policy.
+ * returns a policy carrying the mode and the workspace root — and unlike it
+ * everywhere else, so a suite can make it lie, throw, or hand back a value that
+ * is not a policy.
  * @param mode - the mode `resolve` reports.
- * @param options - `calls` collects every request; `resolve` replaces the answer.
+ * @param options - `calls` collects every request; `resolve` replaces the
+ *   answer; `workspaceRoot` is the root the answer carries (default
+ *   {@link WORKSPACE_ROOT}), and passing `workspaceRoot: undefined` explicitly
+ *   produces an answer without one, which is the root-resolution failure arm.
  * @returns the stand-in service.
  */
 export function sandboxPolicy(mode, options = {}) {
@@ -170,7 +178,7 @@ export function sandboxPolicy(mode, options = {}) {
     calls,
     resolve: options.resolve ?? (request => {
       calls.push(request)
-      return { mode }
+      return { mode, workspaceRoot: options.workspaceRoot ?? WORKSPACE_ROOT }
     }),
   }
 }

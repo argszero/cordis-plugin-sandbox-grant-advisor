@@ -19,6 +19,13 @@
  * session — so what is quoted in the advisory is the policy that actually
  * governed the failing call, not a guess reconstructed from configuration.
  *
+ * The same lookup answers the **workspace root** for the fourth family
+ * (`workspace-denial`, #423), whose claim is that the path a denied command
+ * named lies inside the session's own workspace. Same request, same fail-closed
+ * posture, separate function ({@link resolveWorkspaceRoot}), so that neither
+ * family can fail on a field it never reads and each can name the failure in its
+ * own words.
+ *
  * ## Why this is a guarded lookup instead of an import
  *
  * `@deepseek-ai/dsh-sandbox-policy` is **optional** in this plugin's world: a
@@ -73,6 +80,24 @@ export type ModeResolution =
   | { readonly ok: true, readonly mode: SandboxModeName }
   /** No answer was available, and why — the host side says so out loud. */
   | { readonly ok: false, readonly withheld: string }
+
+/** The outcome of resolving one agent's workspace root. */
+export type RootResolution =
+  /** The workspace root the enforcing providers were handed. */
+  | { readonly ok: true, readonly workspaceRoot: string }
+  /** No answer was available, and why — the host side says so out loud. */
+  | { readonly ok: false, readonly withheld: string }
+
+/** The policy service's answer, before either consumer reads its own field. */
+type PolicyLookup =
+  | { readonly ok: true, readonly resolved: unknown }
+  /**
+   * `why` exists so the two consumers can name the same failure in their own
+   * words: the root is not the mode, and a message that says "the effective
+   * mode is unknown" while the caller asked for a root is exactly the kind of
+   * half-right sentence this module exists to avoid.
+   */
+  | { readonly ok: false, readonly why: 'unmounted' | 'no-session' | 'threw', readonly withheld: string }
 
 /** The `resolve` face this module consumes, structurally. */
 interface PolicyLike {
@@ -130,10 +155,61 @@ function recognizedMode(resolved: unknown): SandboxModeName | undefined {
  * @returns the mode, or the reason it could not be resolved.
  */
 export function resolveSandboxMode(ctx: Context, agent: Agent): ModeResolution {
+  const lookup = policyOf(ctx, agent)
+  if (!lookup.ok) return { ok: false, withheld: lookup.withheld }
+  const mode = recognizedMode(lookup.resolved)
+  if (mode === undefined) {
+    return { ok: false, withheld: '`sandboxPolicy.resolve` returned a value without a recognizable mode' }
+  }
+  return { ok: true, mode }
+}
+
+/**
+ * The workspace root the policy resolver reports for one agent's call.
+ *
+ * The same lookup, the same request and the same fail-closed posture as
+ * {@link resolveSandboxMode}, and for the same reason: the root is what the
+ * enforcing providers were handed, so it is the value the workspace-denial
+ * family must test containment against rather than one reconstructed from
+ * configuration. The two are separate functions rather than one that returns
+ * both because each family needs one of them, and a family that needs only the
+ * mode must not be able to fail on a missing root (nor the other way round).
+ * @param ctx - the plugin's context.
+ * @param agent - the agent whose call failed.
+ * @returns the root, or the reason it could not be resolved.
+ */
+export function resolveWorkspaceRoot(ctx: Context, agent: Agent): RootResolution {
+  const lookup = policyOf(ctx, agent)
+  if (!lookup.ok) {
+    return {
+      ok: false,
+      withheld: lookup.why === 'unmounted'
+        ? 'no `sandboxPolicy` service is mounted in this composition, so the workspace root is unknown'
+        : lookup.withheld,
+    }
+  }
+  const resolved = lookup.resolved
+  const root = resolved === null || typeof resolved !== 'object'
+    ? undefined
+    : (resolved as { workspaceRoot?: unknown }).workspaceRoot
+  if (typeof root !== 'string' || root.length === 0) {
+    return { ok: false, withheld: '`sandboxPolicy.resolve` returned a value without a usable workspace root' }
+  }
+  return { ok: true, workspaceRoot: root }
+}
+
+/**
+ * Ask the mounted policy service for one agent's resolved policy.
+ * @param ctx - the plugin's context.
+ * @param agent - the agent whose call is being placed.
+ * @returns the resolver's answer, or the reason there is none.
+ */
+function policyOf(ctx: Context, agent: Agent): PolicyLookup {
   const policy = asPolicy(ctx.get('sandboxPolicy'))
   if (policy === undefined) {
     return {
       ok: false,
+      why: 'unmounted',
       withheld: 'no `sandboxPolicy` service is mounted in this composition, so the effective mode is unknown',
     }
   }
@@ -141,18 +217,13 @@ export function resolveSandboxMode(ctx: Context, agent: Agent): ModeResolution {
   if (session === undefined) {
     return {
       ok: false,
+      why: 'no-session',
       withheld: 'the agent exposes no session, and the policy must be resolved from it rather than from the deployment default',
     }
   }
-  let resolved: unknown
   try {
-    resolved = policy.resolve({ session })
+    return { ok: true, resolved: policy.resolve({ session }) }
   } catch (error: unknown) {
-    return { ok: false, withheld: `\`sandboxPolicy.resolve\` threw (${String(error)})` }
+    return { ok: false, why: 'threw', withheld: `\`sandboxPolicy.resolve\` threw (${String(error)})` }
   }
-  const mode = recognizedMode(resolved)
-  if (mode === undefined) {
-    return { ok: false, withheld: '`sandboxPolicy.resolve` returned a value without a recognizable mode' }
-  }
-  return { ok: true, mode }
 }

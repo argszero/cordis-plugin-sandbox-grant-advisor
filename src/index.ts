@@ -2,7 +2,7 @@
  * `sandbox-grant-advisor`: turn an environment failure that has no path forward
  * into a diagnosis the model — and the user reading the transcript — can act on.
  *
- * ## The three failures it recognizes
+ * ## The four failures it recognizes
  *
  * **Workspace provisioning (Windows ACL).** Four reports of one signature
  * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
@@ -68,6 +68,26 @@
  * tool's own canonical output, never a line of rendered text — and which three
  * narrowings keep the recognition from firing on something else.
  *
+ * **Denied inside the workspace (Windows ACL, `#423`).** The fourth family is
+ * the other half of the backend the first one explains, and it is the first
+ * whose remedy is withheld on purpose. There the grant could not be applied at
+ * all; here it *was* applied — on the workspace root, once — and Windows ACE
+ * inheritance silently skipped objects whose DACL the caller could not write.
+ * The backend's provisioning check short-circuits on the root (`hasExactGrant`
+ * returns early once the root carries the ACE, `sandbox-windows-acl/src/acl.ts`),
+ * so those descendants are never revisited and the same command fails forever,
+ * while a directory the harness itself created works. It arrives at the same
+ * seam as the native-init family and for the same structural reason: a denied
+ * command exits nonzero and the shipped shell tools report that as a finished
+ * run, so the fact is in `ToolExecutionSuccess.value` rather than in an error.
+ * Unlike that family it needs no bespoke code — the executors stamp the denial
+ * onto the value as a structured triple (`sandbox: { mode, denied, enforcement? }`,
+ * produced by matching the backend's own refusal dialect in the captured
+ * stderr), so this plugin reads the harness's own reading of its own sandbox.
+ * See `src/signature.ts` for the facts that narrow it, and in particular for
+ * why a denial is the *designed* outcome in three other situations (outside the
+ * workspace, under `read-only`, a runner failure) and must never be advised.
+ *
  * ## Where it acts, and why there
  *
  * One listener on the public `tools/post-execute` waterfall
@@ -107,9 +127,15 @@
  *    packaged desktop binary, which the plugin **measures and reports** rather
  *    than assumes), and carries the one conversion a model can actually make —
  *    rewrite the work as PowerShell or `cmd` when the program that could not
- *    start was an MSYS2 one. All three ride `additionalContexts`, so the model
- *    sees the diagnosis beside the failure rather than only in a log it never
- *    reads.
+ *    start was an MSYS2 one. For the workspace-denial family it prints the path
+ *    it keyed on beside the root it tested it against, says that retrying is
+ *    provably useless (the root-only provisioning check never revisits the
+ *    object), gives the two-sided reachability rule, names the label variant of
+ *    the same shape, and prints **no** repair command — the obvious one is
+ *    refused by Windows with `ERROR_NONE_MAPPED (1332)`, and this project has no
+ *    Windows host to verify a line on. All four ride `additionalContexts`, so the
+ *    model sees the diagnosis beside the failure rather than only in a log it
+ *    never reads.
  * 2. **A bounded fail-fast, ACL family only.** With `enforceAfter` set, a call
  *    this plugin has *watched fail* this way is refused at `tools/pre-execute`
  *    once the environment has failed at least that many times. It is off by
@@ -121,8 +147,13 @@
  *    only sent when the resolved mode actually confines; if the mode is not
  *    confining, or cannot be
  *    resolved at all, the failure is left exactly as it was **and the host log
- *    says so once**. Silence alone would make "the sandbox is not the cause" and
- *    "this plugin could not tell" indistinguishable from the outside.
+ *    says so once**. The workspace-denial advisory is withheld the same way when
+ *    the workspace root — the fact the containment claim is tested against —
+ *    cannot be resolved. Silence alone would make "the sandbox is not the cause" and
+ *    "this plugin could not tell" indistinguishable from the outside. A denial
+ *    the classifier *can* place outside the workspace is a different case and is
+ *    left silent on purpose: that is the sanctioned escalation path, not a
+ *    puzzle, and a note about it would be noise.
  *
  * ## Honest boundaries
  *
@@ -139,7 +170,10 @@
  *   tools' own foreground projection with the reported codes, including the
  *   signed form the reporter saw (`-1073741502`) and the real MSYS2 stderr, so the
  *   recognition runs against the producer's data rather than against a message
- *   this plugin invented.
+ *   this plugin invented. The workspace-denial family is exercised the same way:
+ *   the test builds the executors' own `sandbox` stamp and the shipped foreground
+ *   projection, supplies `win32` as the platform fact, and covers both the
+ *   recognized case and each of the narrowings that must stay silent.
  * - **It does not repair anything.** No ACL is written, no privilege is
  *   requested, nothing is elevated, no environment variable is set for another
  *   process, no preset is installed and no mode is changed: the remedies are the
@@ -148,7 +182,7 @@
  *   guard keys on *call identity* (identical arguments retried); this one keys
  *   on the *environment signature*, which is how several different commands can
  *   share one cause. They can be mounted together.
- * - **The real fix is upstream**, in all three families: the ACL failure should
+ * - **The real fix is upstream**, in all four families: the ACL failure should
  *   name
  *   the outstanding condition at the site that knows it (`grantWrite` computes
  *   `hasExactGrant`/`hasExactDeny`/`hasExactLabel` and discards which was
@@ -156,7 +190,12 @@
  *   incompatible with the PTY backend" or fall back to a one-shot shell, and the
  *   sandbox runner should be launched with the environment its own execution
  *   needs (`ELECTRON_RUN_AS_NODE` when argv[0] is an Electron binary) or with a
- *   documented, checkable refusal for MSYS2 programs. This plugin is the stopgap.
+ *   documented, checkable refusal for MSYS2 programs. The workspace-denial family
+ *   is the same shape once more: `grantWrite` returns early when the *root*
+ *   already carries the ACE, so the descendants that missed the propagation are
+ *   never repaired — the check would have to look past the root, or the denial
+ *   surface would have to say *which* path was refused instead of only that one
+ *   was. This plugin is the stopgap.
  *
  * @module @argszero/cordis-plugin-sandbox-grant-advisor
  */
@@ -166,11 +205,24 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { advisoryText, ACL_DISCUSSIONS, denialText, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS } from './advice.js'
+import { advisoryText, ACL_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
 import type { AdvisoryContext } from './advice.js'
-import { classifyNativeInitDeath, classifyProvisioningFailure, classifyPtyStartupFailure } from './signature.js'
-import type { NativeInitFailure, ProvisioningFailure, PtyStartupFailure, RecognizedFailure } from './signature.js'
-import { confines, resolveSandboxMode } from './mode.js'
+import {
+  classifyNativeInitDeath,
+  classifyProvisioningFailure,
+  classifyPtyStartupFailure,
+  classifyWorkspaceDenial,
+  hasWorkspaceDenialStamp,
+} from './signature.js'
+import type {
+  FailureFamily,
+  NativeInitFailure,
+  ProvisioningFailure,
+  PtyStartupFailure,
+  RecognizedFailure,
+  WorkspaceDenialFailure,
+} from './signature.js'
+import { confines, resolveSandboxMode, resolveWorkspaceRoot } from './mode.js'
 import type { SandboxModeName } from './mode.js'
 import {
   advisedOf,
@@ -359,6 +411,10 @@ function summaryOf(failure: RecognizedFailure, mode?: SandboxModeName): string {
     return `sandboxed command never started (exit ${String(failure.rawExitCode)}, STATUS_DLL_INIT_FAILED) `
       + `under sandbox mode "${String(mode)}"`
   }
+  if (failure.family === 'workspace-denial') {
+    const subject = failure.paths[0] ?? 'a path in the workspace'
+    return `denied inside the workspace (${subject}) under sandbox mode "${failure.mode}"`
+  }
   return `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
 }
 
@@ -406,21 +462,21 @@ export function apply(ctx: Context, config: Config = {}): void {
    * @param agent - the agent whose failure was withheld.
    * @param state - the agent's state, to keep the note to one.
    * @param why - what stopped the advisory.
-   * @param failure - the recognized failure that was withheld; only the two
-   *   mode-gated families reach this function, so the thread it cites is exact.
+   * @param family - the recognized family that was withheld. Only families whose
+   *   gate can fail closed reach this function, so the thread it cites is exact.
    * @returns undefined, so callers can `return withhold(...)`.
    */
   function withhold(
     agent: Agent,
     state: AgentState | undefined,
     why: string,
-    failure: PtyStartupFailure | NativeInitFailure,
+    family: FailureFamily,
   ): undefined {
     if (state?.withheld === true) return undefined
     states.set(agent, recordWithheld(state))
-    const discussions = failure.family === 'pty-startup' ? PTY_DISCUSSIONS : NATIVE_INIT_DISCUSSIONS
+    const discussions = DISCUSSIONS_OF[family]
     ctx.logger.warn(
-      `sandbox-grant-advisor: ${failure.family} failure recognized but no advisory sent — ${why}; the raw `
+      `sandbox-grant-advisor: ${family} failure recognized but no advisory sent — ${why}; the raw `
       + `error is left exactly as it is, so this is NOT a claim that the sandbox is unrelated (discussions ${discussions})`,
     )
     return undefined
@@ -449,11 +505,18 @@ export function apply(ctx: Context, config: Config = {}): void {
       // read from `result.value` and never from the rendered text, so a command
       // whose own output mentions the code cannot be mistaken for it.
       const death = classifyNativeInitDeath(result.value)
-      if (death === undefined) {
-        if (previous !== undefined) states.set(agent, observeSuccess(previous, key))
-        return undefined
+      if (death !== undefined) return adviseGated(agent, previous, death, key, exec.name)
+      // The workspace-denial family is the other value-read one, and it is read
+      // only when the host is Windows: the mechanism it explains is ACE
+      // inheritance, which no other backend has, so on macOS/Linux the same
+      // stamp is a different story and is left alone with no note at all (that
+      // is the designed denial path there, not a puzzle). The platform test
+      // comes first so a non-Windows host never pays for the policy lookup.
+      if (process.platform === 'win32' && hasWorkspaceDenialStamp(result.value)) {
+        return adviseWorkspaceDenial(agent, previous, result.value, exec.arguments, key, exec.name)
       }
-      return adviseGated(agent, previous, death, key, exec.name)
+      if (previous !== undefined) states.set(agent, observeSuccess(previous, key))
+      return undefined
     }
     // The two text families read different fields, on purpose. The ACL signature
     // carries an API name plus a Win32 code, which a command's own output does
@@ -510,12 +573,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     tool: string,
   ): UserMessage | undefined {
     const resolution = resolveSandboxMode(ctx, agent)
-    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, failure)
+    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, failure.family)
     const mode = resolution.mode
     if (!confines(mode)) {
       const what = failure.family === 'pty-startup' ? 'the shell' : 'the command'
       return withhold(agent, previous, `the failing call ran under \`${mode}\`, where ${what} is not spawned `
-        + 'through the sandbox', failure)
+        + 'through the sandbox', failure.family)
     }
     if (!claimAdvice(agent, previous, failure, key)) return undefined
     ctx.logger.warn(failure.family === 'pty-startup' ? ptyHostLine(mode) : nativeInitHostLine(failure, mode))
@@ -541,6 +604,65 @@ export function apply(ctx: Context, config: Config = {}): void {
     const first = !advisedOf(advanced, failure.family)
     states.set(agent, first ? recordAdvice(advanced, failure.family) : advanced)
     return first
+  }
+
+  /**
+   * Diagnose one denial whose target lies **inside** the agent's own workspace.
+   *
+   * The fourth family reads the executor's structured stamp rather than a
+   * message, so what is left here is the one fact the stamp cannot carry: the
+   * workspace root, which the containment claim has to be tested against. It is
+   * resolved from the agent's own session (the same resolver the enforcing
+   * providers are handed), and a root that cannot be resolved withholds the
+   * advisory rather than guessing — but only after the stamp has been seen, so
+   * an ordinary successful call costs no note. Once the root is known the
+   * classifier decides; a value that is a denial but names no in-workspace path
+   * is the designed escalation path and is left silent on purpose, which is why
+   * the `undefined` from the classifier is *not* routed through `withhold`.
+   * @param agent - the agent whose call was denied.
+   * @param previous - the agent's state before this call, if any.
+   * @param value - the settled call's canonical value.
+   * @param args - the settled call's parsed arguments.
+   * @param key - the identity of the denied call.
+   * @param tool - the denied tool's name, for the advisory context.
+   * @returns the notice to attach, or undefined.
+   */
+  function adviseWorkspaceDenial(
+    agent: Agent,
+    previous: AgentState | undefined,
+    value: unknown,
+    args: unknown,
+    key: string,
+    tool: string,
+  ): UserMessage | undefined {
+    const resolution = resolveWorkspaceRoot(ctx, agent)
+    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, 'workspace-denial')
+    const failure = classifyWorkspaceDenial(value, args, {
+      platform: process.platform,
+      workspaceRoot: resolution.workspaceRoot,
+    })
+    if (failure === undefined) return undefined
+    if (!claimAdvice(agent, previous, failure, key)) return undefined
+    ctx.logger.warn(workspaceDenialHostLine(failure))
+    return notice(advisoryText(failure, advisoryContext(tool)), summaryOf(failure))
+  }
+
+  /**
+   * The one-line host-side account of a recognized workspace-internal denial.
+   *
+   * It carries the path the plugin keyed on, because this family's whole claim
+   * is that one named path lies inside one named root — a maintainer reading the
+   * log is entitled to see both halves of the string comparison rather than a
+   * verdict about it.
+   * @param failure - the recognized failure.
+   * @returns a single log line.
+   */
+  function workspaceDenialHostLine(failure: WorkspaceDenialFailure): string {
+    const subject = failure.paths[0] ?? '<no path recovered>'
+    const more = failure.paths.length > 1 ? ` (+${String(failure.paths.length - 1)} more inside the same root)` : ''
+    return `sandbox-grant-advisor: confined command denied ${subject}${more}, which is INSIDE the workspace `
+      + `${failure.workspaceRoot}, under sandbox mode "${failure.mode}" — the root-only grant skipped this object and `
+      + `is never revisited, so retrying cannot help; advisory delivered to the model (discussion ${WORKSPACE_DENIAL_DISCUSSIONS})`
   }
 
   /**

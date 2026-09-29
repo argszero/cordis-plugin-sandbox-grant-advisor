@@ -1,5 +1,5 @@
 /**
- * Recognize the three environment failures this plugin explains, and refuse
+ * Recognize the four environment failures this plugin explains, and refuse
  * everything else.
  *
  * ## The ACL provisioning failure (`acl-provisioning`)
@@ -147,6 +147,82 @@
  *   observe and would make this family untestable on the host this plugin is
  *   built on — which is how a family ships without ever having been run.
  *
+ * ## Denied inside the workspace (`workspace-denial`)
+ *
+ * The fourth family is the other half of the same backend the first one
+ * explains. There the grant could not be applied at all and every command died
+ * before it ran; here the grant *was* applied and the workspace looks
+ * provisioned — and part of the tree still refuses writes. `#423` is the
+ * report: under `workspace-write` on Windows, a command writing into a
+ * subdirectory that was created or moved in from outside the session is denied,
+ * forever, while the same command against a directory the harness itself
+ * created succeeds.
+ *
+ * Like the native-init family, and for the same structural reason, this one is
+ * **invisible from the error path**: a denied command exits nonzero, and the
+ * shipped shell tools report a nonzero exit as a finished run rather than as
+ * `isError`, so the fact arrives in `ToolExecutionSuccess.value`. Unlike that
+ * family it does not need a bespoke code to be read — the shipped executors
+ * *stamp the denial* onto the value, as a structured triple no line of rendered
+ * text can fabricate:
+ *
+ *   `sandbox: { mode, denied: true, enforcement? }`
+ *
+ * (`packages/shell/bash-sandbox/src/index.ts` and `pwsh-sandbox`, both on
+ * `classifyDenial`; projected into the tool result value by `tool-bash` /
+ * `tool-pwsh`). `denied` is produced by matching the backend's own refusal
+ * dialect in the *captured stderr* — `'access is denied'`, `'access to the
+ * path'`, `'permission denied'`, `'operation not permitted'` for the
+ * `windows-acl` backend — so the value is the harness's reading of its own
+ * sandbox, not this plugin's reading of a message.
+ *
+ * **`denied` alone is not this family, and the narrowings are the whole
+ * design.** A denial is the *sanctioned* outcome in three other situations, and
+ * advising about a missing inherited grant in any of them would be the
+ * confidently wrong cause this module exists to avoid:
+ *
+ * - **Outside the workspace.** `fs-sandbox` throws its marker only when a path
+ *   falls outside the writable roots, and a confined shell denying a path
+ *   outside the workspace is the designed escalation path — the denial surface
+ *   offers one retry under a wider mode, and that offer is correct there.
+ * - **Under `read-only`.** That mode denies *every* write by construction
+ *   (`fs-sandbox`'s `checkedTarget`: `read-only` throws before any containment
+ *   question is asked), so an in-workspace denial under it is the mode working.
+ * - **A runner failure.** The executor refuses to call a run denied when the
+ *   runner itself failed (`denied: !runnerFailed && …`), and a value that
+ *   carries `runnerFailed: true` is left alone for the same reason.
+ *
+ * What is left is exactly the anomaly: **a denial under `workspace-write` of a
+ * path inside the session's own workspace**, which is the one combination the
+ * harness is supposed to make impossible. The mode comes off the value (the
+ * executor stamped the mode it actually ran under, so no policy lookup can
+ * disagree with it), and the containment test needs the workspace root, which
+ * comes from the policy resolver at the call site —
+ * {@link classifyWorkspaceDenial} takes it as a fact rather than reading it, so
+ * the recognition stays a pure function of its inputs.
+ *
+ * **The in-workspace half of that test is keyed on the command's own text**, and
+ * deliberately not on the stderr the denial was inferred from: the regex looks
+ * for drive-qualified or UNC path literals in the call's `command` argument, and
+ * the family is recognized only when **every** such literal it finds lies under
+ * the workspace root. A command that names an outside path as well — an
+ * interpreter shipped under `C:\Program Files`, an output directory on another
+ * volume — is refused rather than guessed at, and so is a command that names
+ * only relative paths: in both cases the plugin cannot say *which* path was
+ * denied, and silence is the fail-closed direction. The paths it did key on are
+ * carried into the advisory, so the reader can see the reasoning rather than
+ * take it on faith.
+ *
+ * **The platform gate is real here, and unlike the native-init family it cannot
+ * be dropped.** The mechanism is Windows ACE inheritance: the backend writes the
+ * grant once, on the workspace root, and relies on the operating system to
+ * propagate it to descendants, which needs `WRITE_DAC` on each descendant at
+ * that moment. Every other backend applies its policy per call to the process
+ * (landlock rules, a bwrap profile, a seatbelt profile) and has no descendant to
+ * miss, so the same value on those hosts is a different story. `win32` is
+ * therefore part of recognition, passed in rather than read, and the suite runs
+ * this family with the platform fact supplied.
+ *
  * @module
  */
 
@@ -177,6 +253,8 @@ export type FailureFamily =
   | 'pty-startup'
   /** A confined Windows child died while its native images were initializing. */
   | 'native-init'
+  /** A confined command was denied a path inside its own workspace (Windows ACL). */
+  | 'workspace-denial'
 
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
@@ -244,8 +322,60 @@ export interface NativeInitFailure {
   readonly exitCode: number
 }
 
+/**
+ * The mode in which a write **inside** the workspace is supposed to succeed.
+ *
+ * It is the only mode this family is recognized under, and that is a fact about
+ * the other two rather than about this one: `read-only` denies every write by
+ * construction, and `danger-full-access` spawns nothing through the sandbox at
+ * all — so a denial under either is the mode doing its job, and the one place a
+ * denial is an anomaly is here.
+ */
+export const DENIAL_MODE = 'workspace-write'
+
+/**
+ * The facts the workspace-denial recognition needs beyond the result value.
+ *
+ * Both are passed in rather than read here, for the reason the other families
+ * state in their own words: a gate that trusts the shape of its input is the
+ * gate that reports a cause from the wrong world. The type is also what keeps
+ * the platform fact honest — the Android/Cygwin-style "`process.platform` is
+ * win32" belief cannot be smuggled in as a default.
+ */
+export interface WorkspaceDenialFacts {
+  /** The host's `process.platform`, as the caller read it. */
+  readonly platform: string
+  /** The session's workspace root, as the policy resolver reported it. */
+  readonly workspaceRoot: string
+}
+
+/**
+ * A confined command that was denied a path inside its own workspace.
+ *
+ * The producer fields are kept verbatim rather than paraphrased, so the advisory
+ * can show the reader the exact facts the recognition keyed on — which matters
+ * more here than anywhere else in this module, because the family's claim
+ * ("this path is inside your workspace") is a statement about two strings.
+ */
+export interface WorkspaceDenialFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'workspace-denial'
+  /** The mode the denied call ran under, as the executor stamped it on the value. */
+  readonly mode: string
+  /** The command's exit status, or `null` when the tool reported none. */
+  readonly exitCode: number | null
+  /** The in-workspace absolute paths the call named, in the order they appear. */
+  readonly paths: readonly string[]
+  /** The workspace root those paths were tested against, as it was given. */
+  readonly workspaceRoot: string
+}
+
 /** Any failure this plugin recognizes, tagged by family. */
-export type RecognizedFailure = ProvisioningFailure | PtyStartupFailure | NativeInitFailure
+export type RecognizedFailure =
+  | ProvisioningFailure
+  | PtyStartupFailure
+  | NativeInitFailure
+  | WorkspaceDenialFailure
 
 /**
  * The producer's format is fixed by `Win32Error`
@@ -353,6 +483,119 @@ export function classifyNativeInitDeath(value: unknown): NativeInitFailure | und
 export function failureLine(failure: RecognizedFailure): string {
   if (failure.family === 'pty-startup') return failure.line
   if (failure.family === 'native-init') return `[exit code: ${String(failure.rawExitCode)}]`
+  if (failure.family === 'workspace-denial') {
+    const status = failure.exitCode === null ? '' : `[exit code: ${String(failure.exitCode)}] `
+    return `${status}sandbox: { mode: "${failure.mode}", denied: true }`
+  }
   const suffix = failure.detail.length === 0 ? '' : `: ${failure.detail}`
   return `${failure.api} failed (Win32 ${failure.win32Code})${suffix}`
+}
+
+/**
+ * The drive-qualified and UNC path literals in one command line.
+ *
+ * Deliberately crude, in the direction that keeps the diagnosis honest. A
+ * literal is taken to end at the first character a shell token cannot carry
+ * unquoted, so a path containing a space is recovered as its first segment — a
+ * **prefix** of the real path, which preserves the containment answer for every
+ * path that lies under the root (a prefix of a descendant is still a descendant)
+ * and refuses the test for paths whose root itself contains a space. A path that
+ * appears twice is returned once.
+ * @param command - the `command` argument of the failing shell call.
+ * @returns the literals found, in order, without trailing separators.
+ */
+export function windowsPathsIn(command: string): string[] {
+  const found: string[] = []
+  for (const match of command.matchAll(/(?:[A-Za-z]:[\\/]|\\\\)[^\s"'`|<>;&,]*/g)) {
+    const literal = match[0].replace(/[\\/]+$/, '')
+    if (literal.length >= 3 && !found.includes(literal)) found.push(literal)
+  }
+  return found
+}
+
+/**
+ * Whether one path lies at or under one root, the way Windows compares them.
+ * @param root - the workspace root.
+ * @param path - the candidate path.
+ * @returns true when `path` is `root` itself or a descendant of it.
+ */
+export function isInsideWorkspace(root: string, path: string): boolean {
+  const canon = (value: string): string => value.replaceAll('/', '\\').replace(/\\+$/, '').toLowerCase()
+  const base = canon(root)
+  const target = canon(path)
+  if (base.length === 0 || target.length === 0) return false
+  return target === base || target.startsWith(`${base}\\`)
+}
+
+/**
+ * Whether one settled value carries the executors' workspace-denial stamp.
+ *
+ * The **structural half** of the fourth family's recognition, split out so that
+ * "this is not a denial at all" (silent, and the overwhelming majority of
+ * successful calls) stays distinguishable from "this is a denial and the plugin
+ * could not finish placing it" — the case the disclosure rule requires the host
+ * log to account for. It reads the value the executors wrote, never a line of
+ * rendered text, and it is deliberately platform-blind: the platform gate is a
+ * fact the classifier takes as an argument, and a stamp test that baked it in
+ * could not be used to decide whether a missing platform fact is worth saying
+ * out loud.
+ *
+ * What it does **not** decide is which path was denied — that needs the call's
+ * arguments and the workspace root, and belongs to
+ * {@link classifyWorkspaceDenial}. A stamp alone is the sanctioned outcome in
+ * three other situations (outside the workspace, under `read-only`, a runner
+ * failure); this function excludes the third by itself and leaves the first two
+ * to the classifier, which is the only place they can be separated.
+ * @param value - a settled execution's canonical value.
+ * @returns true when the value is a foreground shell projection stamped
+ *   `denied: true` under `workspace-write` with no runner failure.
+ */
+export function hasWorkspaceDenialStamp(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const probe = value as { kind?: unknown, sandbox?: unknown }
+  if (probe.kind !== FOREGROUND) return false
+  const sandbox = probe.sandbox
+  if (sandbox === null || typeof sandbox !== 'object') return false
+  const { mode, denied, runnerFailed } = sandbox as { mode?: unknown, denied?: unknown, runnerFailed?: unknown }
+  return mode === DENIAL_MODE && denied === true && runnerFailed !== true
+}
+
+/**
+ * Classify one **successful** execution's canonical value as a workspace-internal
+ * denial, and recover the paths the call named.
+ *
+ * Four facts, in the order they narrow: the call ran on Windows (the mechanism
+ * is ACE inheritance, which no other backend has); the value carries the
+ * executor's denial stamp ({@link hasWorkspaceDenialStamp}); the call's
+ * `command` argument carries at least one absolute Windows path literal; and
+ * **all** of them lie under the workspace root. The last is the one that
+ * separates this family from the sanctioned escalation path — a command naming
+ * any path outside its own workspace is refused rather than guessed at, because
+ * the plugin cannot say which path the sandbox refused.
+ * @param value - the settled execution's canonical value (`ToolExecutionSuccess.value`).
+ * @param args - the settled call's parsed arguments (`ToolExecution.arguments`).
+ * @param facts - the host platform and the session's workspace root.
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyWorkspaceDenial(
+  value: unknown,
+  args: unknown,
+  facts: WorkspaceDenialFacts,
+): WorkspaceDenialFailure | undefined {
+  if (facts.platform !== 'win32') return undefined
+  if (!hasWorkspaceDenialStamp(value)) return undefined
+  const probe = value as { exitCode?: unknown }
+  const command = (args as { command?: unknown } | null | undefined)?.command
+  if (typeof command !== 'string') return undefined
+  const named = windowsPathsIn(command)
+  if (named.length === 0) return undefined
+  if (!named.every(path => isInsideWorkspace(facts.workspaceRoot, path))) return undefined
+  const exitCode = typeof probe.exitCode === 'number' && Number.isInteger(probe.exitCode) ? probe.exitCode : null
+  return {
+    family: 'workspace-denial',
+    mode: DENIAL_MODE,
+    exitCode,
+    paths: named,
+    workspaceRoot: facts.workspaceRoot,
+  }
 }
