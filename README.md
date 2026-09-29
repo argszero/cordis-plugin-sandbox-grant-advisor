@@ -236,8 +236,9 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Two reports of one exit code: [`#7876`] (the packaged desktop app) and [`#7877`]
-(MSYS2 / Git Bash). Both are `0xC0000142` `STATUS_DLL_INIT_FAILED` — the Windows
+Three reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+app, measured twice) and [`#7877`] (MSYS2 / Git Bash). All are `0xC0000142`
+`STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
 with its own status and prints its own output; this one produced neither.
@@ -258,16 +259,27 @@ Two producers have been measured under a confining mode:
    (`@deepseek-ai/dsh-base/cordis.patch.yml`), so the combination is likely
    never covered upstream. The **one conversion a model can make itself** is to
    write the same work as a PowerShell or `cmd` command.
-2. **The packaged desktop app's sandbox runner** ([`#7876`]).
+2. **The packaged desktop app's sandbox runner** ([`#7876`], [`#8193`]).
    `dsh-sandbox-local` launches the runner as `[process.execPath, entry]`, and
-   in the packaged build `process.execPath` is the Electron executable, which
-   starts as an *application* unless the child's environment carries
-   `ELECTRON_RUN_AS_NODE=1` — so the runner never runs and every confined command
-   reports this code with **no output at all**. The unpacked node host
-   (`node apps/cli/lib/bin.js web`) is unaffected. The plugin reports whether
-   *this* process is an Electron binary (`process.versions.electron`) as a
-   measured fact rather than assuming it, because that is the check the
-   discriminator turns on.
+   in the packaged build `process.execPath` is the Electron executable. Two
+   measurements of that host exist and — from inside a session — they are
+   indistinguishable, so the advisory names **both** instead of asserting one:
+   **(a)** the runner does not start at all — the Electron binary begins as an
+   *application* unless the child's environment carries `ELECTRON_RUN_AS_NODE=1`,
+   so nothing on the runner path ran ([`#7876`]); **(b)** the runner *does*
+   start — the desktop launcher sets exactly that variable — and the command
+   still dies, because the restricted token is derived from the Electron process
+   image and the child does not survive being started under it ([`#8193`]). A
+   reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for
+   that host, and does the ACL runner appear among its processes while the
+   command runs?); from inside the session they are one finding with one remedy.
+   The unpacked node host (`node apps/cli/lib/bin.js web`) is unaffected. The
+   plugin reports whether *this* process is an Electron binary
+   (`process.versions.electron`) as a measured fact rather than assuming it,
+   because that is the check the discriminator turns on. **0.6.0 asserted shape
+   (a) alone** — "so the runner never runs" — and handed the Electron reader a
+   cause that [`#8193`] measures to be false; the single-cause sentence is gone,
+   and a test arm keeps it gone.
 
 **Why this family is read from a successful result.** The producer never marks
 it an error, and that is a fact about upstream rather than a choice here:
@@ -325,7 +337,10 @@ backend's own source avoids `CREATE_NO_WINDOW` for). So the advisory diagnoses
 the **class** ("the process never reached its entry point") and enumerates the
 producers measured under a confining mode, each with the check that separates
 them — one of which the reader answers (what program failed to start) and one of
-which the plugin answers (is this host the packaged desktop binary). It never
+which the plugin answers (is this host the packaged desktop binary). Where a
+producer has more than one measured shape, the advisory names all of them and
+records which check separates them outside the session, rather than asserting
+the single shape that happened to be measured first. It never
 offers `danger-full-access` as a fix and never suggests a sandbox setting be
 relaxed.
 
@@ -524,7 +539,7 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.6.0` re-ran all five lines above. A line whose probe fails is
+the plugin, so `0.7.0` re-ran all five lines above. A line whose probe fails is
 removed from the range rather than left claimed. The scratch tree's resolved
 versions are the ones to read back when a probe is quoted as evidence — the probe
 script pins them by exact version, and `--keep` leaves the tree in place to check.
@@ -574,3 +589,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#7804]: https://github.com/deepseek-ai/deepseek-harness/discussions/7804
 [#7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [#7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
+[#8193]: https://github.com/deepseek-ai/deepseek-harness/discussions/8193

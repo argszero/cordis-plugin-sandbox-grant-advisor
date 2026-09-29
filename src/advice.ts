@@ -58,7 +58,12 @@
  *   is guess which producer this is: the code alone cannot say, and the two
  *   checks it hands over are facts the reader holds (what program they ran;
  *   whether this is the packaged desktop app, which the plugin reports rather
- *   than assumes).
+ *   than assumes). That Electron host is itself **two measurements**, not one —
+ *   a runner that never started at all, and a runner that did start and whose
+ *   child cannot survive the restricted token derived from an Electron process
+ *   image — and the advisory names both instead of asserting the one it shipped
+ *   first, because a session cannot tell them apart and a confidently wrong
+ *   cause is worse than two named ones with one shared remedy.
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -70,7 +75,9 @@
  * family it is two checks the reader performs — which program could not start,
  * and whether this host is the packaged desktop app — because the code alone
  * cannot separate the producers and a guess would send half its readers to the
- * wrong remedy.
+ * wrong remedy. Inside that Electron answer there is a third thing the code
+ * cannot separate, and the advisory deliberately does not try: it names both
+ * measurements and says the remedy does not depend on choosing between them.
  *
  * @module
  */
@@ -86,7 +93,7 @@ export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / 
 export const PTY_DISCUSSIONS = '#7638'
 
 /** The upstream threads the native-init-death advisory is a stopgap for. */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193'
 
 /** The documented prerequisite, quoted from the backend's README. */
 export const PREREQUISITE = 'granted directories must be caller-owned and grant `WRITE_OWNER`'
@@ -406,9 +413,16 @@ function nativeInitAdvisory(
     '     continue — do not retry the MSYS2 program.',
     '  2. The packaged desktop application\'s sandbox runner. `dsh-sandbox-local` starts the runner as',
     '     `[process.execPath, runner.js]`, and in the packaged build `process.execPath` is the Electron',
-    '     executable, which starts as an *application* unless the child\'s environment carries',
-    '     `ELECTRON_RUN_AS_NODE=1` — so the runner never runs and every confined command reports this code',
-    '     with no output at all (#7876).',
+    '     executable. Two measurements of that host exist and from inside a session they are',
+    '     indistinguishable, so both are named here rather than one asserted:',
+    '     (a) the runner does not start at all: the Electron binary begins as an *application* unless the',
+    '         child\'s environment carries `ELECTRON_RUN_AS_NODE=1`, so nothing on the runner path ran (#7876);',
+    '     (b) the runner does start — the desktop launcher sets exactly that variable — and the command still',
+    '         dies, because the restricted token is derived from the Electron process image and the child does',
+    '         not survive being started under it (#8193).',
+    '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',
+    '     the ACL runner appear among its processes while the command runs?); from inside the session they are',
+    '     one finding with one remedy, so nothing here waits on telling them apart.',
     onElectron
       ? '     This process IS an Electron binary (`process.versions.electron` is set), so that producer applies here:'
       : '     This process is NOT an Electron binary (`process.versions.electron` is unset), so the runner is a real',
@@ -416,7 +430,7 @@ function nativeInitAdvisory(
       ? '     run the same command with `danger-full-access`, or from an unpacked `node apps/cli/lib/bin.js web`'
       : '     Node binary here and that producer cannot be the cause. If the program was not an MSYS2 one either,',
     onElectron
-      ? '     host where the runner is a real Node binary. If it works there, the runner never ran and this is the cause.'
+      ? '     host where the runner is a real Node binary. The command starts there in either shape, and that — the host, not the flags — is the discriminator.'
       : '     this failure is outside both measured producers: stop and hand it to the user.',
     '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',

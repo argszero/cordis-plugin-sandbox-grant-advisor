@@ -520,6 +520,14 @@ test('the native-init advisory names the class, both producers, and their checks
   assert.match(flat, /ELECTRON_RUN_AS_NODE=1/)
   assert.match(flat, /\[process\.execPath, runner\.js\]/)
   assert.match(flat, /#7876/)
+  // And the second measurement of that same host, which the text must name
+  // rather than assert away: a runner that DID start (#8193).
+  assert.match(flat, /Two measurements of that host exist/)
+  assert.match(flat, /the runner does not start at all/)
+  assert.match(flat, /the runner does start/)
+  assert.match(flat, /the restricted token is derived from the Electron process image/)
+  assert.match(flat, /not survive being started under it \(#8193\)/)
+  assert.doesNotMatch(flat, /the runner never ran/)
   // The measured fact about THIS process, not an assumption about it: this arm
   // runs off the packaged desktop, so the producer that needs Electron is ruled
   // out — and it says why.
@@ -566,6 +574,40 @@ test('the Electron fact is reported, so the same code reads differently on the t
   // With no explicit answer the plugin asks the live process, which on the host
   // this suite runs on is not Electron — and says so rather than staying silent.
   assert.match(advisoryText(failure, { mode: 'workspace-write' }), /This process is NOT an Electron binary/)
+})
+
+test('the Electron host names both of its measurements instead of asserting the one it shipped first', () => {
+  // The defect this pins against: `0.6.0` said that the Electron executable
+  // "starts as an *application* unless the child's environment carries
+  // `ELECTRON_RUN_AS_NODE=1` — so the runner never runs", and then told the
+  // Electron reader that a real-node host working out means "the runner never
+  // ran". `#8193` measures the desktop launcher SETTING that variable: the
+  // runner runs, and the child still dies because the restricted token is
+  // derived from the Electron process image. Every reader in that shape was
+  // given a cause that was false, attached to a check that confirms the host
+  // and therefore seemed to confirm the mechanism.
+  const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH))
+  assert.ok(failure)
+  const flat = advisoryText(failure, { mode: 'workspace-write', electronHost: false }).replace(/\s+/g, ' ')
+  assert.match(flat, /Two measurements of that host exist and from inside a session they are indistinguishable/)
+  assert.match(flat, /both are named here rather than one asserted/)
+  assert.match(flat, /\(a\) the runner does not start at all/)
+  assert.match(flat, /nothing on the runner path ran \(#7876\)/)
+  assert.match(flat, /\(b\) the runner does start/)
+  assert.match(flat, /not survive being started under it \(#8193\)/, 'the second measurement keeps its own thread')
+  // The reader keeps a check, and it is one they can actually run — a process
+  // tree and an environment variable — rather than a mechanism the session has
+  // to settle before it can act.
+  assert.match(flat, /is `ELECTRON_RUN_AS_NODE` set for that host/)
+  assert.match(flat, /does the ACL runner appear among its processes while the command runs/)
+  assert.match(flat, /one finding with one remedy, so nothing here waits on telling them apart/)
+  // The conclusion the Electron branch draws is the host, not the flag — and it
+  // is the same conclusion whichever measurement is the live one.
+  const onElectron = advisoryText(failure, { mode: 'workspace-write', electronHost: true }).replace(/\s+/g, ' ')
+  assert.match(onElectron, /The command starts there in either shape/)
+  assert.match(onElectron, /that — the host, not the flags — is the discriminator/)
+  assert.doesNotMatch(onElectron, /the runner never ran/)
+  assert.doesNotMatch(onElectron, /the runner never runs/)
 })
 
 test('the native-init advisory refuses to be built without the mode it explains', () => {

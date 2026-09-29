@@ -247,4 +247,5 @@ test('a configured href replaces the thread line in this family as well', async 
   assert.doesNotMatch(body, /tracked upstream \(discussions/)
   assert.match(body, /\(#7877\)/)
   assert.match(body, /\(#7876\)/)
+  assert.match(body, /\(#8193\)/)
 })

@@ -145,6 +145,27 @@ const MUTATIONS = [
     edits: [['context.electronHost ?? electronHost()', 'true']],
   },
   {
+    // The defect that produced the version after 0.6.0: the desktop producer was
+    // asserted with the single shape that was measured first, so a reader holding
+    // the second measurement (#8193) was handed a cause that is false there.
+    name: 'the desktop producer asserts one measured shape again, reviving the sentence #8193 measures false',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     indistinguishable, so both are named here rather than one asserted:',", "    '     so the runner never runs:',"]],
+  },
+  {
+    name: 'the second measurement of the desktop host loses the thread that measured it',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '         not survive being started under it (#8193).',", "    '         not survive being started under it.',"]],
+  },
+  {
+    name: 'the check that separates the two measurements is withheld from the reader',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     A reader outside the session separates them (is `ELECTRON_RUN_AS_NODE` set for that host, and does',", "    '     From inside the session the two are one finding:',"]],
+  },
+  {
     name: 'the advisory asserts one producer instead of enumerating the measured two',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
