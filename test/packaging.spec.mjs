@@ -29,6 +29,8 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
+import { ACL_DISCUSSIONS } from '../lib/advice.js'
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 
@@ -171,6 +173,26 @@ test('every manifest entry point is in the tarball, and the patch names this plu
   const patch = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
   assert.ok(patch.includes(manifest.name), 'the bundle patch must mount this package by name')
   assert.ok(patch.includes('sandbox-grant-advisor'), 'the bundle patch must use this plugin\'s id')
+})
+
+test('the shipped bundle patch describes the family the advice module covers, and the remedy it recommends', () => {
+  // The patch is published prose: a reader mounting the plugin reads it before any
+  // advisory fires. It was written when the family had three reports and one
+  // remedy, and it then kept saying so through every later release — three
+  // families, twelve reports and a remedy forked on ownership arrived in the
+  // advisory and in the README while this file stayed as it was first written.
+  // Nothing caught it, because the only assertion here was that the file exists
+  // and names the package: a published surface with no assertion is where the
+  // stale text lives. These two assertions are derived from the module rather
+  // than spelled out, so the patch cannot drift from what the plugin says.
+  const patch = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
+  const tracked = ACL_DISCUSSIONS.match(/#\d+/g) ?? []
+  assert.ok(tracked.length >= 10, `expected the advice module to name the family, read ${tracked.length}`)
+  for (const id of tracked) {
+    assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
+  }
+  assert.ok(/\(Get-Acl/.test(patch), 'the bundle patch does not hand over the ownership check its remedy is forked on')
+  assert.ok(/\(WO\)/.test(patch), 'the bundle patch does not name the narrow right; the broad one-liner is the remedy that is refused on a directory the caller does not own')
 })
 
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {
