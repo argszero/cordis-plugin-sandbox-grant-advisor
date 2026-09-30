@@ -177,12 +177,19 @@ import type { SandboxModeName } from './mode.js'
  * The upstream threads the ACL advisory is a stopgap for.
  *
  * The first twelve report the provisioning failure itself (the merged DACL +
- * label write being refused). The last two, `#8312` and `#8314`, report the
- * other end of the same backend — what its grant leaves behind once it
- * *succeeds* — which the advisory states because it is the fact a reader needs
- * at the moment it hands them the command that applies that grant.
+ * label write being refused). `#8312` and `#8314` report the other end of the
+ * same backend — what its grant leaves behind once it *succeeds* — which the
+ * advisory states because it is the fact a reader needs at the moment it hands
+ * them the command that applies that grant. The last three arrived later and
+ * are all inside the same advisory: `#8426` is the independent, unelevated
+ * measurement of the missing `WRITE_OWNER` the diagnosis above had only ever
+ * argued for, and `#8412` is a second instance of what the grant leaves behind
+ * (the standing Low label reaching programs the user launches themselves).
+ * `#8409` is the same backend once more and belongs to both lists: one of its
+ * three defects is the provisioning failure this family explains, and another
+ * is the fourth family's third branch.
  */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232 / #8272 / #8275 / #8312 / #8314'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232 / #8272 / #8275 / #8312 / #8314 / #8426 / #8412 / #8409'
 
 /**
  * The upstream threads the persistent-shell advisory is a stopgap for.
@@ -214,9 +221,13 @@ export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / 
  * `#8383` then measured on its own — the exact complement, with the DACL
  * present and inheriting correctly at every level while the label reaches none
  * of the subdirectories, so the variant stopped being a footnote and became the
- * second branch the discriminator forks into.
+ * second branch the discriminator forks into; `#8421` met it again, which is
+ * why the branch reads as a shape rather than as one install. `#8409` is the
+ * third branch's source and a report of the DACL half as well: the workspace
+ * root's own standing grant can be gone, and the layer that would re-apply it
+ * consults a per-lifetime map instead of the DACL, so nothing notices.
  */
-export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383'
+export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383 / #8421 / #8409'
 
 /**
  * The thread list each family's withholding note cites.
@@ -465,6 +476,62 @@ function degradedGrant(): string[] {
 }
 
 /**
+ * The independent measurement of the missing right, from `#8426`.
+ *
+ * Everything above is argued from the backend's own source — the merged
+ * security-information flags, the owner's implicit rights, the mask an inherited
+ * `Authenticated Users` entry carries. A reader is entitled to a measurement
+ * taken by someone who had none of that, and `#8426` is one: on a directory
+ * whose ACL named the account only through that inherited Modify entry, asking
+ * the directory for a Low mandatory-integrity label — the label half alone, no
+ * DACL write, so it isolates the right the merged call wants — was refused, and
+ * the same operation succeeded the moment that account granted itself
+ * `(OI)(CI)F`, whose mask carries `WRITE_OWNER`. Unelevated throughout, and
+ * reversible afterwards (the level moved back to Medium just as easily). That is
+ * the missing right demonstrated from outside this project's reading, and it is
+ * a right on the **directory**: no `SeRelabelPrivilege`, no token privilege, no
+ * elevation.
+ *
+ * The command itself is deliberately **not** printed here, and that is a
+ * decision rather than an omission — the same one the `#8272` paragraph of the
+ * README records. A label write is not a check: where the caller holds Full
+ * control it SUCCEEDS, and then the label and its inheritance are already
+ * written. This module hands over only operations that are safe to run when they
+ * succeed, which is why the two checks above are reads. The evidence is what the
+ * report measured; the probe stays in the report.
+ *
+ * The same report then repaired two real trees the same way — object right
+ * first, integrity label second, 9521 and 5592 objects, no failures. The order
+ * is not interchangeable and is worth stating: the second step is the one that
+ * needs what the first supplies. Both halves are already in the advisory's own
+ * remedy, in the same order.
+ *
+ * The contrast with the workspace-denial family is deliberate. There the
+ * recursive grant cannot be hand-written at all, because the SID it must name
+ * has no name to map (`ERROR_NONE_MAPPED`, 1332), which is why that advisory
+ * forks on breadth instead of handing over a line.
+ * @returns the section's lines.
+ */
+function writeOwnerEvidence(): string[] {
+  return [
+    'A second confirmation, measured by a reporter who had none of the reasoning above (#8426) — unelevated, on a',
+    'directory whose ACL named the account only through the inherited `Authenticated Users:(M)` entry: asking that',
+    'directory for a Low mandatory-integrity label — the LABEL half on its own, with no DACL write, so it isolates',
+    'the one right this call wants — was refused, and the identical operation stopped being refused the moment the',
+    'same account granted itself `(OI)(CI)F`, whose mask carries WRITE_OWNER: same account, same elevation,',
+    'succeeding at once, and reversible from there (the level moves back to Medium just as easily).',
+    'So the missing right is a right on this DIRECTORY, exactly as the diagnosis above reads it: no',
+    'SeRelabelPrivilege, no token privilege, no elevation anywhere in that measurement. (That probe is not printed',
+    'here and is not offered as a check: a label write is not a read — where the caller already holds Full control',
+    'it succeeds, and then the label and its inheritance are written. This module hands over only the two reads',
+    'above.) The same report repaired two real trees that way — object right first, integrity label second, 9521',
+    'and 5592 objects, no failures — an order that cannot be swapped, since the second step is the one that needs',
+    'what the first supplies; which is why the remedy below grants first and lets the backend write the label.',
+    '',
+  ]
+}
+
+/**
  * What the grant leaves behind once it applies, and how far its label travels.
  *
  * The advisory hands the reader a command that makes the backend's workspace
@@ -590,6 +657,7 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     '(WO) / Write owner. If the strongest entry naming you is (M) / Modify — or no entry names you at all and',
     'your access comes from an inherited `Authenticated Users:(M)` — that is this failure.',
     '',
+    ...(failure.klass === 'apply-denied' ? writeOwnerEvidence() : []),
     'Ownership decides which of the two commands below can work, so read it first — PowerShell 5.1 or later:',
     `  (Get-Acl "${path}").Owner      # compare with: whoami`,
     'If that is not your own account, take the second branch: the first one is refused before it runs.',
@@ -917,6 +985,11 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  therefore never revisited — not later in this session, not in any later one — so the identical command keeps',
     '  failing and there is no number of attempts that changes that',
     '  (`packages/sandbox/sandbox-windows-acl/src/acl.ts`).',
+    '  There is a second, higher skip, and it is the one the third branch below turns on: on a session-scoped',
+    '  workspace the layer that ASKS for the grant keeps its own per-lifetime map of the roots it has already',
+    '  provisioned and consults that map instead of the DACL, so for those roots the check above is not even reached',
+    '  again (`packages/sandbox/sandbox-local/src/index.ts`: the map guard at :403-421, "materializes once per',
+    '  workspace per server lifetime").',
     '  WHICH objects miss it is a fact about who created them: objects the harness itself creates inherit the ACE,',
     '  while objects that already existed or that another account or tool created (an installer, an editor, another',
     '  agent harness running under its own account) are the ones the propagation skipped. #423 measured 170 of 729',
@@ -926,7 +999,7 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  ACE half arrives — that is the second branch below, and it produces this identical denial. Both halves are',
     '  permanent for the same reason, so settling WHICH one you are looking at comes before anything else.',
     '',
-    'Confirm it — and settle FIRST which of the two halves is missing, because both produce this same denial and a',
+    'Confirm it — and settle FIRST which of the three is missing, because all three produce this same denial and a',
     'reader who repairs the wrong one has learned nothing:',
     `  icacls "${subject}"`,
     `  icacls "${failure.workspaceRoot}"`,
@@ -937,6 +1010,11 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '    (#8383). A Low-integrity child may write to a directory only when that directory\'s own mandatory-integrity',
     '    label is Low as well; the kernel runs its no-write-up check IN ADDITION to the access check, so a DACL that',
     '    is perfect everywhere changes nothing.',
+    '  - THE ROOT ITSELF IS REFUSED — nothing writes, the root included, and work that used to succeed here now',
+    '    does not → NEITHER half above (#8409). The standing grant is gone from the root\'s own DACL, and the layer',
+    '    that would put it back has stopped looking. Two things about this branch are different in kind from the',
+    '    other two: no command reaches it, and it is the one branch of this family with a recovery inside the',
+    '    product — both are in half three below.',
     '',
     'Half one — the DACL ACE did not reach the object:',
     '  The root carries an inheritable ACE for the workspace capability SID — a `S-1-4-…` that `icacls` prints as an',
@@ -968,7 +1046,9 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  all matching) before it returns early, so once the root is labelled the propagation is never attempted again and',
     '  the children that missed it are never revisited — the same root-only short-circuit as the DACL half, on the',
     '  other half of the same call (`packages/sandbox/sandbox-windows-acl/src/acl.ts`: the guard at :386-388, the',
-    '  label read at :198-204).',
+    '  label read at :198-204). A second report met this same half afterwards (#8421): the label written on the root',
+    '  alone, the pre-existing subdirectories carrying none of it. That is why this branch is stated as a shape this',
+    '  backend produces rather than as one machine\'s result.',
     '  The package README describes that label as inheritable and covering the tree, and its grant materialization as',
     '  an eager full-tree propagation. Read it as a statement about the ACE that is written, not about what the',
     '  children ended up carrying: the inheritance flag is declared on the root, the propagation to the children is',
@@ -976,6 +1056,33 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  `diagnose-windows-sandbox-acl` (0.2.0 and later) prints the directory\'s owner, the caller\'s rights and',
     '  `WRITE_DAC`/`WRITE_OWNER` — the facts the DACL half turns on — and `LOW_LABEL` (`S-1-16-4096`) for this one.',
     '  TEST: does a subdirectory show the capability ACE WITHOUT a Mandatory Label line? Yes → this half.',
+    '',
+    'Half three — the standing grant is gone from the ROOT itself (#8409, reported 2026-09-30):',
+    '  Reported as a control beside two other defects on the same install (Windows 11, NTFS) rather than as a',
+    '  theory: after the workspace root\'s own security descriptor is rewritten from OUTSIDE the harness — an ACL',
+    '  reset, a restored descriptor, a tool that re-applies one — every write inside the workspace is refused, the',
+    '  root\'s own directory included. What is missing is the ACE the harness itself wrote, not a descendant\'s',
+    '  inheritance of it:',
+    '    icacls "<root>"        → no ACE for the workspace capability SID in its own DACL',
+    '  The discriminator is what the SAME machine does on the other path, and the reporter measured both: the',
+    '  agentless/runner invocation recovered by itself with no restart, while the desktop session did not. That',
+    '  asymmetry is not one path being more careful — it is where the cache lives. The session-scoped provider',
+    '  materializes the root ACE ONCE PER PROVIDER LIFETIME and keeps that root in its own in-memory map; every later',
+    '  call consults the map and never reads the DACL again, so the exact-ACE check the two halves above turn on is',
+    '  not even reached (`packages/sandbox/sandbox-local/src/index.ts`: the guard at :403-421, "materializes once per',
+    '  workspace per server lifetime" at :359, and the standing edits it skips are called the "cross-session reuse',
+    '  cache" in `packages/sandbox/sandbox-windows-acl/src/grant.ts:22-31`). The runner path used by agentless',
+    '  sessions passes no session id (`windowsAclRunnerArgv()`, :365-380), so the runner owns the DACLs there and',
+    '  re-applies the grant on every spawn — which really does read the DACL, and that is why that path heals and',
+    '  this one does not.',
+    '  RECOVERY: this is the only branch of this family a user can leave behind, and the move is the PROVIDER rather',
+    '  than a command. RESTART IT — quit and reopen the desktop app, or open the workspace in a fresh one. That',
+    '  empties the map, so the next provision reads the DACL, finds the ACE absent and writes it again; the reporter',
+    '  measured exactly that ("restarting the desktop brings it back"). Nothing reachable from inside this session',
+    '  gets there: the map is what is being consulted, and no command you can run here changes what it holds. Do not',
+    '  reach for either repair above either — both are about propagating a grant to DESCENDANTS, and this branch has',
+    '  lost the grant the propagation starts from.',
+    '  TEST: is the workspace ROOT itself denied — no capability ACE in its own DACL? Yes → this branch.',
     '',
     'Why the natural repair is closed — this is a Windows ceiling, not a mistake in the command:',
     '  The grant the root carries is written for a capability SID, and a recursive `icacls /grant "*S-1-4-…:…" /T /C`',
@@ -985,6 +1092,9 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  subtree is a SACL write, which needs the object right the merged call already needed, and a manually widened',
     '  DACL does NOT clear the failure — #8383 confirmed that adding an explicit FullControl entry for the user on a',
     '  subdirectory still left the write denied, because the refusal happens before the ACL is ever consulted.',
+    '  The third branch is not closed by this ceiling and does not need to be: there is nothing to write by hand',
+    '  there — the grant that went missing is the harness\'s own, and all that has to happen is for the layer holding',
+    '  the map to look at the DACL again, which the restart in half three is what makes it do.',
     '',
     'What helps:',
     '  - The move that is yours, and the only one available inside the session: write new files under a directory the',
@@ -998,6 +1108,7 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '    WRITE_DAC on it, by writing the ACE the root carries into the child\'s own DACL. For the label half, the',
     '    corresponding move is on the integrity label rather than the DACL, and it has to cover the tree, not one',
     '    object; it is the same class of object write, so it is not something an unelevated prompt can do either.',
+    '    For the third branch there is no object to repair at all: the move is the restart named in half three.',
     '  - The route that costs no rights at all, and the honest recommendation while the halves remain unrepairable from',
     '    inside: build and run where the confinement is not the thing under test — which is a decision about what you',
     '    are doing, not a sandbox tier to reach for silently.',
@@ -1010,7 +1121,8 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     'the next session meets the same gap. Take it only if that is what you mean to buy.',
     '',
     'Do NOT retry this call unchanged: the provisioning path short-circuits on the root — on the grant AND on the',
-    'label — so the object that missed the propagation is never revisited.',
+    'label — so the object that missed the propagation is never revisited; and in the third branch the layer still',
+    'being consulted is the provider\'s own map, which nothing inside this session can change.',
     '',
     'How to read this: the denial names no cause and points at no repair, so the diagnosis is delivered here instead.',
     'This is a stopgap, ' + where + '. This plugin speaks only when the mode is `workspace-write`, the host is',

@@ -38,6 +38,16 @@
 #     `diagnose-windows-sandbox-acl` repair arrives with the `0.2.0` line. Neither
 #     makes downgrading a fix, and repairing the `0.1.7` file list is not a thing
 #     that can be done — there is nothing in that release to list.
+#   - the missing right confirmed from outside (#8426): asking a directory that
+#     names the account only through the inherited `Authenticated Users:(M)`
+#     entry for a Low mandatory-integrity label is refused unelevated — the label
+#     half alone isolates the right the merged call wants — and the identical
+#     operation succeeds the moment that account grants itself `(OI)(CI)F`, so the
+#     missing right is a right on the directory, not `SeRelabelPrivilege` and not
+#     elevation. The same report repaired two trees object-right-first and
+#     label-second (9521 and 5592 objects, no failures), the order the advisory's
+#     own remedy already follows. The probe is not offered as a check: a label
+#     write is not a read.
 #
 # The advisory also says why a "weaker grant" is not a smaller version of the
 # same one, because that is the next idea the diagnosis invites: the label rides
@@ -45,8 +55,8 @@
 # the confined token is itself lowered to Low, so the directory's Low label is
 # what lets that child write there at all.
 #
-# And it says WHAT THE GRANT LEAVES BEHIND once it applies (#8312, #8314): the
-# three entries are STANDING and nothing revokes them (the backend's own dispose
+# And it says WHAT THE GRANT LEAVES BEHIND once it applies (#8312, #8314, #8412):
+# the three entries are STANDING and nothing revokes them (the backend's own dispose
 # and fail-closed paths leave them — "the intended end state (the reuse cache)"),
 # the Low integrity label is INHERITABLE and lives in the SACL (so `icacls /reset`
 # does not remove it — that rebuilds the DACL), a process starts at
@@ -136,13 +146,13 @@
 # with why a windowless console is still an inheritable console. Like the second
 # family, it is mode-gated.
 #
-# A FOURTH family is the other half of the FIRST one's backend (#423, #8383).
-# There the grant could not be applied at all; here it WAS applied — on the
-# workspace root, once — and Windows ACE inheritance silently skipped the objects
-# whose DACL the caller could not write, so commands writing into a subdirectory
-# created or moved in from outside (an installer, an editor, another harness
-# under its own account) are denied forever while the same command against a
-# directory the harness itself created succeeds. The backend's provisioning check
+# A FOURTH family is the other half of the FIRST one's backend (#423, #8383,
+# #8421, #8409). There the grant could not be applied at all; here it WAS applied
+# — on the workspace root, once — and Windows ACE inheritance silently skipped the
+# objects whose DACL the caller could not write, so commands writing into a
+# subdirectory created or moved in from outside (an installer, an editor, another
+# harness under its own account) are denied forever while the same command against
+# a directory the harness itself created succeeds. The backend's provisioning check
 # short-circuits on the root (the grant, the world delete-child deny and the
 # exact label must all match before it returns early), so those descendants are
 # never revisited. It is read from a value rather than from text, like the third
@@ -170,15 +180,28 @@
 #     plus the capability SID looks granted to a check that merely greps for the
 #     SID;
 #   - NOTHING below the root writable at all, the root itself the only writable
-#     place → the LABEL branch (#8383, measured on 0.2.0-rc.2 with the decisive
-#     control of a directory created after the grant): the DACL is present and
-#     inherits correctly at every level while the Low mandatory-integrity label
-#     never reaches the children, so the kernel's no-write-up check refuses the
-#     Low-integrity child before the ACL is ever consulted — same permanent shape
-#     (the label goes out in the same single security-descriptor write as the
-#     grant, only on the paths the backend enumerates, with no descendant walk),
-#     separable from outside a session by the repository's own
-#     `diagnose-windows-sandbox-acl` and its `LOW_LABEL` (`S-1-16-4096`) report.
+#     place → the LABEL branch (#8383, second instance #8421; measured on
+#     0.2.0-rc.2 with the decisive control of a directory created after the grant):
+#     the DACL is present and inherits correctly at every level while the Low
+#     mandatory-integrity label never reaches the children, so the kernel's
+#     no-write-up check refuses the Low-integrity child before the ACL is ever
+#     consulted — same permanent shape (the label goes out in the same single
+#     security-descriptor write as the grant, only on the paths the backend
+#     enumerates, with no descendant walk), separable from outside a session by
+#     the repository's own `diagnose-windows-sandbox-acl` and its `LOW_LABEL`
+#     (`S-1-16-4096`) report;
+#   - THE ROOT ITSELF REFUSED, nothing writable, not even the root → a third
+#     shape, and the only branch of this family with a recovery inside the product
+#     (#8409). The standing grant is gone from the root's own DACL — rewritten
+#     from outside the harness — and the layer that would put it back has stopped
+#     looking: the session-scoped provider materializes the root ACE once per
+#     provider lifetime and consults its own in-memory map afterwards without
+#     ever re-reading the DACL, while the agentless/runner path passes no session
+#     id, owns the DACLs itself and re-applies the grant on every spawn — which
+#     is why that path heals and this one does not. No command reaches it; the
+#     move is the user's and it is the provider, not the ACL: restart the desktop
+#     app or open the workspace in a fresh one, which empties the map and lets the
+#     next provision re-read the DACL and rewrite the missing ACE.
 #
 # It also states the Windows ceiling that closes the obvious repair (a recursive
 # `icacls /grant` for a capability SID is refused with ERROR_NONE_MAPPED (1332),

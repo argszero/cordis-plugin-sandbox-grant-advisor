@@ -203,6 +203,15 @@ test('the shipped bundle patch describes the family the advice module covers, an
   }
   assert.ok(/\(Get-Acl/.test(patch), 'the bundle patch does not hand over the ownership check its remedy is forked on')
   assert.ok(/\(WO\)/.test(patch), 'the bundle patch does not name the narrow right; the broad one-liner is the remedy that is refused on a directory the caller does not own')
+  // The fourth family forks three ways since 0.14.0, and the third branch is the
+  // only one whose remedy is not a diagnosis to read but an action the user takes:
+  // a mount instruction that stops at the two propagation halves describes a
+  // smaller family than the plugin covers, and drops the one recovery it has.
+  assert.ok(/THE ROOT ITSELF REFUSED/.test(patch), 'the bundle patch does not describe the fourth family\'s third branch')
+  assert.ok(/restart the desktop/i.test(patch), 'the bundle patch never names the recovery the third branch has')
+  // And the first family's independent confirmation, which is the difference
+  // between a reading of the source and a measurement of it.
+  assert.ok(/confirmed from outside/.test(patch), 'the bundle patch does not carry the independent confirmation of the missing right')
 })
 
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {

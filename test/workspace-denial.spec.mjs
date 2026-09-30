@@ -115,6 +115,14 @@ test('a denial inside the workspace turns a "successful" call into the diagnosis
     assert.match(body, /D:\\ws\\logs\\app\.log/, 'the path it keyed on is shown')
     assert.match(body, /workspace root: D:\\ws/, 'and so is the root it tested it against')
     assert.match(body, /Do NOT retry this call unchanged/)
+    // The fork is ternary since 0.14.0: the two halves above, and the root itself
+    // refused — the one branch whose recovery is a user restart rather than a
+    // command, because the layer holding the answer is the provider's own map and
+    // not the DACL. End to end, so the third branch really reaches the model.
+    assert.match(body, /THE ROOT ITSELF IS REFUSED/)
+    assert.match(body, /Half three — the standing grant is gone from the ROOT itself \(#8409/)
+    assert.match(body, /RESTART IT/)
+    assert.match(body, /#8421/, 'the label half cites its second instance')
 
     // The gate asked the real resolver once, for this agent's own session.
     assert.equal(policy.calls.length, 1, 'one resolution per recognized failure')

@@ -286,8 +286,8 @@ const MUTATIONS = [
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
     edits: [
-      ["the FIRST one's backend (#423, #8383)", "the FIRST one's backend (#423)"],
-      ["the LABEL branch (#8383, measured on 0.2.0-rc.2 with the decisive", "the LABEL branch (measured on 0.2.0-rc.2 with the decisive"],
+      ["the FIRST one's backend (#423, #8383,", "the FIRST one's backend (#423,"],
+      ["the LABEL branch (#8383, second instance #8421; measured on", "the LABEL branch (second instance #8421; measured on"],
     ],
   },
   {
@@ -389,7 +389,9 @@ const MUTATIONS = [
       + "    '  all matching) before it returns early, so once the root is labelled the propagation is never attempted again and',\n"
       + "    '  the children that missed it are never revisited — the same root-only short-circuit as the DACL half, on the',\n"
       + "    '  other half of the same call (`packages/sandbox/sandbox-windows-acl/src/acl.ts`: the guard at :386-388, the',\n"
-      + "    '  label read at :198-204).',",
+      + "    '  label read at :198-204). A second report met this same half afterwards (#8421): the label written on the root',\n"
+      + "    '  alone, the pre-existing subdirectories carrying none of it. That is why this branch is stated as a shape this',\n"
+      + "    '  backend produces rather than as one machine\\'s result.',",
       "    '  Why it is permanent: the label is applied to the workspace root and the children are expected to inherit it.',",
     ]],
   },
@@ -461,6 +463,127 @@ const MUTATIONS = [
     edits: [[
       "    'confined path above. It appears on the ORDINARY subprocess path (`dsh-subprocess-local`: `windowsHide:`',",
       "    'confined path above. It appears in the job runner (`dsh-jobs`: `windowsHide:`',",
+    ]],
+  },
+  {
+    // 0.14.0's first addition. The third branch is the only cell of the fourth
+    // family whose cause is not a missed propagation and whose remedy is not a
+    // repair: a text that stops at the two halves sends a reader whose ROOT is
+    // refused to repair descendants that were never the problem.
+    name: 'the third breadth branch is dropped, so a refused ROOT reads as one of the propagation halves',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  - THE ROOT ITSELF IS REFUSED — nothing writes, the root included, and work that used to succeed here now',\n"
+      + "    '    does not → NEITHER half above (#8409). The standing grant is gone from the root\\'s own DACL, and the layer',\n"
+      + "    '    that would put it back has stopped looking. Two things about this branch are different in kind from the',\n"
+      + "    '    other two: no command reaches it, and it is the one branch of this family with a recovery inside the',\n"
+      + "    '    product — both are in half three below.',",
+      "    '  - Anything else you see is one of those two; there is no third shape to consider.',",
+    ]],
+  },
+  {
+    // The layer the reporter could not see: without it the branch reads as the
+    // backend forgetting to re-check the DACL, which is a different (and wrong)
+    // repair target — the idempotency check the other two branches turn on is not
+    // what is being consulted here.
+    name: 'the provider-lifetime map is replaced by the backend\'s own check',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  materializes the root ACE ONCE PER PROVIDER LIFETIME and keeps that root in its own in-memory map; every later',\n"
+      + "    '  call consults the map and never reads the DACL again, so the exact-ACE check the two halves above turn on is',\n"
+      + "    '  not even reached (`packages/sandbox/sandbox-local/src/index.ts`: the guard at :403-421, \"materializes once per',\n"
+      + "    '  workspace per server lifetime\" at :359, and the standing edits it skips are called the \"cross-session reuse',\n"
+      + "    '  cache\" in `packages/sandbox/sandbox-windows-acl/src/grant.ts:22-31`). The runner path used by agentless',",
+      "    '  checks the root again on every call, so the exact-ACE check the two halves above turn on is what decides',\n"
+      + "    '  here (`packages/sandbox/sandbox-windows-acl/src/acl.ts`). The runner path used by agentless',",
+    ]],
+  },
+  {
+    // The recovery, which is the whole reason this branch is worth separating: it
+    // is the user's move and it is the provider, not a command run in the session.
+    name: 'the third branch loses its recovery, so the root-refused cell reads as unrepairable',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  RECOVERY: this is the only branch of this family a user can leave behind, and the move is the PROVIDER rather',\n"
+      + "    '  than a command. RESTART IT — quit and reopen the desktop app, or open the workspace in a fresh one. That',\n"
+      + "    '  empties the map, so the next provision reads the DACL, finds the ACE absent and writes it again; the reporter',\n"
+      + "    '  measured exactly that (\"restarting the desktop brings it back\"). Nothing reachable from inside this session',",
+      "    '  There is no recovery here: this branch is as permanent as the two above and no user action short of a',\n"
+      + "    '  reinstall reaches the layer holding the answer. Nothing reachable from inside this session',",
+    ]],
+  },
+  {
+    // The citation the label half's second instance hangs on — the branch is a
+    // shape this backend produces, and dropping the second report turns it back
+    // into one machine's result.
+    name: 'the label half drops its second instance and reads as a single machine\'s result',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  label read at :198-204). A second report met this same half afterwards (#8421): the label written on the root',",
+      "    '  label read at :198-204).',",
+    ]],
+  },
+  {
+    // 0.14.0's second addition. The confirmation is evidence for the class whose
+    // diagnosis is the missing right; attaching it to a class that never
+    // established that right is the failure mode this module is built to avoid.
+    name: 'the independent confirmation is emitted for every class instead of the one it is about',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    ...(failure.klass === 'apply-denied' ? writeOwnerEvidence() : []),",
+      '    ...writeOwnerEvidence(),',
+    ]],
+  },
+  {
+    // What the evidence is evidence OF. A measurement that reads as a token
+    // privilege hands the reader back the hypothesis the whole module refuses.
+    name: 'the independent confirmation is re-read as a token privilege',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'SeRelabelPrivilege, no token privilege, no elevation anywhere in that measurement. (That probe is not printed',",
+      "    'SeRelabelPrivilege on the account is what it really wants, as the elevation-free result above suggests. (That probe is not printed',",
+    ]],
+  },
+  {
+    // The decision the module records in its own prose: the probe is quoted in the
+    // README and must not be handed to the model, because a label write is not a
+    // read — it succeeds where the caller holds Full control, and then the label
+    // and its inheritance are already written.
+    name: 'the label-write probe the module refuses to hand over is published in the advisory',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'here and is not offered as a check: a label write is not a read — where the caller already holds Full control',",
+      "    'here: run `icacls \"<dir>\" /setintegritylevel \"(OI)(CI)Low\"` to see it for yourself — where the caller already holds Full control',",
+    ]],
+  },
+  {
+    // The mount instructions are published prose with no compiler over them, and
+    // 0.14.0 added a branch and a thread to them. Dropping the newest id leaves a
+    // patch that describes a smaller family than the advisory covers.
+    name: 'the mount instructions drop the fourth family\'s third branch and its thread',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [
+      ['# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421, #8409).', '# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421).'],
+      ['THE ROOT ITSELF REFUSED, nothing writable, not even the root', 'A third shape of the same denial'],
+      ['restart the desktop\n#     app or open the workspace in a fresh one', 'upgrade the harness\n#     or open the workspace in a fresh one'],
+    ],
+  },
+  {
+    // The first family's new thread in the same published surface.
+    name: 'the mount instructions drop the independent confirmation and its thread',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [[
+      '#   - the missing right confirmed from outside (#8426): asking a directory that',
+      '#   - one more fact about the missing right: asking a directory that',
     ]],
   },
 ]

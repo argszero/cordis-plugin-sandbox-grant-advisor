@@ -46,8 +46,9 @@ inherited `Authenticated Users: Modify` is the whole of their access). In each o
 every sandboxed command fails the same way, before it runs, and the error names
 neither the missing right nor a remedy.
 
-Two further reports — [discussion #8312] and [discussion #8314] — describe the
-other end of the same backend: what its grant leaves behind *after* it applies.
+Two further reports — [discussion #8312] and [discussion #8314] — and a third,
+[discussion #8412], describe the other end of the same backend: what its grant
+leaves behind *after* it applies.
 The advisory states that too (see [What the grant leaves behind](#what-the-grant-leaves-behind-added-in-0100)),
 because the advisory is the thing handing over the command that applies the grant.
 
@@ -183,6 +184,25 @@ Two consequences follow from that one line:
    one of two independent layers. The advisory says this instead of a bare "no",
    because a reader told only "no" reaches for the workaround without knowing what
    else it has to change.
+7. **The missing right was confirmed from outside, unelevated** (added in 0.14.0,
+   from `#8426`). Everything above is argued from the backend's source; `#8426`
+   measured it with none of that. On a directory whose ACL named the account only
+   through the inherited `Authenticated Users:(M)` entry, asking that directory
+   for a Low mandatory-integrity label — the label half alone, no DACL write, so
+   it isolates the right the merged call wants — was **refused**, and the
+   identical operation **succeeded** the moment the same account granted itself
+   `(OI)(CI)F`, whose mask carries `WRITE_OWNER`, and was reversible from there
+   (back to Medium works just as well). No elevation anywhere in it. That makes the
+   claim in item 2 a measurement rather than a reading: the missing right is an
+   object right on the **directory**, not `SeRelabelPrivilege` and not a token
+   privilege. The same report then repaired two real trees the same way — object
+   right first, integrity label second, 9521 and 5592 objects, no failures — an
+   order that cannot be swapped, since the second step is the one that needs what
+   the first supplies, and it is the order the advisory's own remedy already
+   follows. The probe itself is quoted here and **not** in the advisory, for the
+   reason item 6 of the `#8272` paragraph above gives: a label write is not a
+   check, because where the caller already holds Full control it succeeds and
+   writes the label. The advisory hands over only the two read-only checks.
 
 The grant is materialized lazily, on the first confined call, and **nothing is
 cached when it throws** — so the same failure repeats per command (850 calls
@@ -653,7 +673,7 @@ the single shape that happened to be measured first. It never
 offers `danger-full-access` as a fix and never suggests a sandbox setting be
 relaxed.
 
-### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0; the two branches it forks into in 0.13.0)
+### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0; the branches it forks into in 0.13.0 and 0.14.0)
 
 [#423] is one report and its own follow-up, and it is the **other end of the
 backend §1 is about**. There the workspace grant could not be applied at all and
@@ -707,7 +727,8 @@ reading of its own sandbox, not a guess about a line of output.
   `Administrators`/`SYSTEM` plus the capability SID is refused on the read side
   too, and looks fine to a check that merely greps for the capability SID.
   [#423] measured exactly that on a `.cache` directory.
-- **The fork, and the second branch** (added in 0.13.0, from [#8383]). The
+- **The fork, and the other two branches** (the second added in 0.13.0 from
+  [#8383] and its second instance [#8421]; the third in 0.14.0 from [#8409]). The
   grant and the mandatory-integrity **label** go out in the same single
   security-descriptor write, and that write lands on the workspace root (plus
   the session's private temp directory) with **no descendant walk** — so the
@@ -718,27 +739,50 @@ reading of its own sandbox, not a guess about a line of output.
   matching, `acl.ts:386-388`, label read at `:198-204`) before it returns early,
   so once the root is labelled the propagation is never attempted again and an
   unlabelled child is never revisited — the same root-only short-circuit as the
-  DACL half, on the other half of the same call. From inside a session the two
-  are indistinguishable, so the advisory forks them on **breadth**, the one fact
-  the reader already owns: a **handful** of stubborn objects while the rest of
-  the tree writes normally is the DACL branch, and **nothing below the root
-  writable at all**, with the root itself the only writable place, is the label
-  branch. A Low-integrity child may write to a directory only if that
-  directory's own label is Low — the kernel's no-write-up check runs *in
-  addition to* the access check — so a DACL that is perfect everywhere changes
-  nothing. [#8383] measured it on `0.2.0-rc.2` with the decisive control of a
-  directory created **after** the grant: it inherits the capability ACE marked
-  `(I)` and still gets no label. (The report's own care is worth keeping: a
-  *grandchild* directory having no label proves nothing, because inheritance is
-  per-parent and the intermediate directory carries none — only a **direct**
-  child of the labelled root is evidence.) From outside a session the
-  repository's own diagnosis skill separates the halves
-  (`diagnose-windows-sandbox-acl`, 0.2.0 and later, prints the owner, the
-  caller's rights and `WRITE_DAC`/`WRITE_OWNER` for the DACL half and `LOW_LABEL`
-  — `S-1-16-4096` — for this one). And a widened DACL does not clear it either,
-  because the refusal precedes the ACL: [#8383] confirmed that adding an
-  explicit `FullControl` entry for the user on a subdirectory still left the
-  write denied.
+  DACL half, on the other half of the same call. From inside a session the
+  branches are indistinguishable, so the advisory forks them on **breadth**, the
+  one fact the reader already owns: a **handful** of stubborn objects while the
+  rest of the tree writes normally is the DACL branch, **nothing below the root
+  writable at all** with the root itself the only writable place is the label
+  branch, and **the root itself refused** — nothing writable, not even the root —
+  is a third branch with a different cause and a different remedy (below). A
+  Low-integrity child may write to a directory only if that directory's own label
+  is Low — the kernel's no-write-up check runs *in addition to* the access check
+  — so a DACL that is perfect everywhere changes nothing. [#8383] measured it on
+  `0.2.0-rc.2` with the decisive control of a directory created **after** the
+  grant: it inherits the capability ACE marked `(I)` and still gets no label.
+  (The report's own care is worth keeping: a *grandchild* directory having no
+  label proves nothing, because inheritance is per-parent and the intermediate
+  directory carries none — only a **direct** child of the labelled root is
+  evidence.) From outside a session the repository's own diagnosis skill
+  separates the DACL half from the label half (`diagnose-windows-sandbox-acl`,
+  0.2.0 and later, prints the owner, the caller's rights and
+  `WRITE_DAC`/`WRITE_OWNER` for the one and `LOW_LABEL` — `S-1-16-4096` — for the
+  other). And a widened DACL does not clear the label half either, because the
+  refusal precedes the ACL: [#8383] confirmed that adding an explicit
+  `FullControl` entry for the user on a subdirectory still left the write denied.
+- **The third branch, and the one recovery this family has** (added in 0.14.0,
+  from [#8409]). The root's own standing grant can be **gone**: the workspace
+  root's security descriptor rewritten from outside the harness (an ACL reset, a
+  restored descriptor, a tool that re-applies one) leaves nothing writable, the
+  root included. It is not a descendant missing an inherited ACE — it is the ACE
+  the harness itself wrote that is no longer there — and the reason no retry
+  reaches it is one layer **above** the backend's own check: the session-scoped
+  provider materializes the root ACE once per **provider lifetime** and keeps the
+  root in its own in-memory map, consulting the map instead of the DACL
+  thereafter (`sandbox-local/src/index.ts`: the guard at `:403-421`,
+  "materializes once per workspace per server lifetime"), so the `hasExactGrant`
+  check the other two branches turn on is not even reached again. The
+  discriminator is measured on both paths and is a fact about where the cache
+  lives, not about one path being more careful: the agentless/runner invocation
+  passes no session id (`windowsAclRunnerArgv()`), so the runner owns the DACLs
+  and re-applies the grant on **every** spawn — which really does read the DACL —
+  and heals by itself, while the desktop session does not. The recovery is the
+  only one this family has and it is the **user's**, not a command: restart the
+  provider (quit and reopen the desktop app, or open the workspace in a fresh
+  one), which empties the map and lets the next provision read the DACL, find the
+  ACE absent and write it — the reporter measured exactly that ("restarting the
+  desktop brings it back").
 - **No repair command.** The obvious one, a recursive `icacls /grant` for the
   capability SID, is refused by Windows itself with `ERROR_NONE_MAPPED` (1332) —
   the tool cannot map that SID to a name, so a grant that must name it never
@@ -1069,6 +1113,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [discussion #8232]: https://github.com/deepseek-ai/deepseek-harness/discussions/8232
 [discussion #8272]: https://github.com/deepseek-ai/deepseek-harness/discussions/8272
 [discussion #8275]: https://github.com/deepseek-ai/deepseek-harness/discussions/8275
+[discussion #8412]: https://github.com/deepseek-ai/deepseek-harness/discussions/8412
 [discussion #7638]: https://github.com/deepseek-ai/deepseek-harness/discussions/7638
 [discussion #7876]: https://github.com/deepseek-ai/deepseek-harness/discussions/7876
 [discussion #7877]: https://github.com/deepseek-ai/deepseek-harness/discussions/7877
@@ -1098,3 +1143,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8334]: https://github.com/deepseek-ai/deepseek-harness/discussions/8334
 [#8336]: https://github.com/deepseek-ai/deepseek-harness/discussions/8336
 [#8383]: https://github.com/deepseek-ai/deepseek-harness/discussions/8383
+[#8409]: https://github.com/deepseek-ai/deepseek-harness/discussions/8409
+[#8412]: https://github.com/deepseek-ai/deepseek-harness/discussions/8412
+[#8421]: https://github.com/deepseek-ai/deepseek-harness/discussions/8421
+[#8426]: https://github.com/deepseek-ai/deepseek-harness/discussions/8426

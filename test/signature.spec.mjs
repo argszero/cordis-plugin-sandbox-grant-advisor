@@ -319,7 +319,35 @@ test('the weaker-grant section is emitted only for the class whose diagnosis is 
     const text = advisoryText(classifyProvisioningFailure(message))
     assert.doesNotMatch(text, /One thing to know before asking for a weaker grant/, message)
     assert.doesNotMatch(text, /there is no DACL-only path to fall back to/, message)
+    // The #8426 confirmation is the same claim as the diagnosis, so it is gated
+    // with it: the two classes that never established the missing right must not
+    // be handed a measurement of it.
+    assert.doesNotMatch(text, /A second confirmation, measured by a reporter/, message)
   }
+})
+
+test('the missing right is confirmed by a measurement, not only by a reading of the source', () => {
+  // #8426 arrived at the same conclusion as the diagnosis above without any of
+  // its reasoning, and that is exactly what makes it worth publishing: the module
+  // had only ever argued the right from the backend's own source. What is
+  // asserted here is the shape of the evidence AND the one thing the module still
+  // refuses — the probe is not handed over, because a label write is not a read.
+  const text = advisoryText(classifyProvisioningFailure(REPORTED))
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /A second confirmation, measured by a reporter who had none of the reasoning above \(#8426\)/)
+  assert.match(flat, /unelevated, on a directory whose ACL named the account only through the inherited `Authenticated Users:\(M\)` entry/)
+  assert.match(flat, /the LABEL half on its own, with no DACL write/)
+  assert.match(flat, /the same account granted itself `\(OI\)\(CI\)F`, whose mask carries WRITE_OWNER/)
+  assert.match(flat, /no SeRelabelPrivilege, no token privilege, no elevation anywhere in that measurement/)
+  // The independent repair of two real trees, in the order the remedy already
+  // uses — object right first, label second.
+  assert.match(flat, /object right first, integrity label second, 9521 and 5592 objects, no failures/)
+  assert.match(flat, /an order that cannot be swapped/)
+  // And the rule the probe stays out of the advisory for.
+  assert.match(flat, /is not offered as a check: a label write is not a read/)
+  assert.match(flat, /This module hands over only the two reads above/)
+  assert.doesNotMatch(text, /setintegritylevel/i, 'the probe is quoted in the README, never handed over here')
+  assert.ok(ACL_DISCUSSIONS.includes('#8426'))
 })
 
 test('the remedy forks on ownership, because one command cannot serve both environments', () => {
@@ -1022,7 +1050,22 @@ test('the workspace-denial advisory shows its work, and prints no repair command
   assert.match(flat, /NOTHING below the root is writable at all[^.]*→ the LABEL half/)
   assert.match(flat, /Half one — the DACL ACE did not reach the object/)
   assert.match(flat, /Half two — the DACL arrived and the LABEL did not \(#8383, measured 2026-09-30\)/)
-  // The second branch's own mechanism: the same root-only short-circuit, on
+  // The third branch (#8409): the root's own standing grant gone, the provider's
+  // per-lifetime map the only layer still consulted, and the one recovery this
+  // family has — the user's, not a command.
+  assert.match(flat, /settle FIRST which of the three is missing/)
+  assert.match(flat, /THE ROOT ITSELF IS REFUSED — nothing writes, the root included/)
+  assert.match(flat, /Half three — the standing grant is gone from the ROOT itself \(#8409, reported 2026-09-30\)/)
+  assert.match(flat, /materializes the root ACE ONCE PER PROVIDER LIFETIME/)
+  assert.match(flat, /materializes once per workspace per server lifetime/)
+  assert.match(flat, /the guard at :403-421/)
+  assert.match(flat, /cross-session reuse/)
+  assert.match(flat, /windowsAclRunnerArgv/)
+  assert.match(flat, /RESTART IT — quit and reopen the desktop app/)
+  assert.match(flat, /restarting the desktop brings it back/)
+  assert.match(flat, /no command you can run here changes what it holds/)
+  assert.match(flat, /#8421/, 'the label half names its second instance')
+  assert.match(flat, /the third branch the layer still being consulted is the provider's own map/)  // The second branch's own mechanism: the same root-only short-circuit, on
   // the label half of the same call.
   assert.match(flat, /the same single security-descriptor write that carries the grant/)
   assert.match(flat, /`hasExactGrant\(\)` \+ `hasExactDeny\(\)` \+ `hasExactLabel\(\)`\s*all matching/)
