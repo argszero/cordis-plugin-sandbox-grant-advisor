@@ -195,7 +195,7 @@ export const PTY_DISCUSSIONS = '#7638 / #8322'
  * launched from a terminal does not, which is the same variable the PTY family
  * now names.
  */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334'
 
 /**
  * The upstream thread the workspace-denial advisory is a stopgap for.
@@ -731,12 +731,31 @@ function nativeInitAdvisory(
     'Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of',
     'its own DLLs dies this way too, and the backend\'s own source records the console case as an inherent',
     'limit of the backend (`CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE` children die with `STATUS_DLL_INIT_FAILED`',
-    'under the restriction). #8208 explains that limit instead of repeating it, and the explanation is what the',
-    'two shapes above share: in a restricted token a console can be INHERITED but not CREATED. The creation',
-    'flags actually passed are three sets and none of them is `CREATE_NO_WINDOW` — `0` on the piped path,',
-    '`CREATE_SUSPENDED` on the inherited-job path, and `CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the',
-    'ordinary path. Those same flags are fatal under a console-less runner and harmless under one that owns a',
-    'console, so it is the console and not the flag list that decides.',
+    'under the restriction). #8208 explains that limit instead of repeating it, and the explanation is a single',
+    'rule: in a restricted token a console can be INHERITED but not CREATED. Both shapes above follow from it —',
+    'the child needs a console it did not create, and anything that forces it to CREATE one is fatal on its own.',
+    '#8336 measured that side directly, on one machine, with a console-owning host, a restricted token and the',
+    'Low integrity level, varying only the creation flags: `0`, `DETACHED_PROCESS` and `CREATE_NEW_PROCESS_GROUP`',
+    'all reached the program, while `CREATE_NO_WINDOW` and `CREATE_NEW_CONSOLE` both died with the code above.',
+    '`STARTF_USESHOWWINDOW` with `SW_HIDE` — how a window is hidden without isolating a console — was harmless,',
+    'and so was `CREATE_NO_WINDOW` on an UNRESTRICTED token, which is what makes the two a pair rather than a',
+    'list of forbidden flags.',
+    'The creation flags this harness actually passes are three sets and none of them is `CREATE_NO_WINDOW` —',
+    '`0` on the piped path, `CREATE_SUSPENDED` on the inherited-job path, and',
+    '`CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the ordinary path (that constant is not defined anywhere',
+    'in the process source). Those three are fatal under a console-less host and harmless under a host that owns',
+    'a console, so there the console decides. A flag that forces creation is a different animal: it decides even',
+    'when a console is there to be inherited.',
+    '',
+    'One thing that gets suspected and is not the cause: `windowsHide`. It is named here because it is the',
+    'first thing a search turns up, and it points at the wrong component — the flag is not set anywhere on the',
+    'confined path above. It appears on the ORDINARY subprocess path (`dsh-subprocess-local`: `windowsHide:`',
+    '`platform === \'win32\'`), which starts the runner rather than the confined child, and the restricted spawn',
+    'in `dsh-win32-process` passes the three flag sets just listed and defines no `CREATE_NO_WINDOW` constant at',
+    'all. Where it IS set — on the host — #8208 measured it both ways on a host that works: with and without',
+    '`windowsHide`, the confined `pwsh` reached exit 0 with its own stdout intact. The reason is the rule again:',
+    'a windowless console is still a console, and that is what the child inherits. What decides is whether the',
+    'host owns a console OBJECT, not whether it owns a window.',
     '',
     'One arm of this family was applied, measured, and rejected — named so a reader does not reach for it:',
     'putting `DETACHED_PROCESS` on the RESTRICTED CHILD removes its console request and does stop the crash,',

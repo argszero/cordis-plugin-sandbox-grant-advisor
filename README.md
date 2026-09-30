@@ -439,10 +439,13 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Five reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+Seven reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
 app), [`#8313`] (the same version and the same mode run as the desktop app versus
-the Web UI launched from a terminal, which works) and [`#7877`] (MSYS2 / Git
-Bash) — and [`#8208`], which found the mechanism the console cases share. All are `0xC0000142`
+the Web UI launched from a terminal, which works), [`#8334`] (the same code with
+the authorization side attached: the grant **succeeded** and every confined child
+still died) and [`#7877`] (MSYS2 / Git
+Bash) — and [`#8208`], which found the mechanism the console cases share, and
+[`#8336`], which measured the creation flags that mechanism turns on. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
@@ -548,10 +551,37 @@ Two producers have been measured under a confining mode:
    ordinary path (`process.ts:567`, i.e. `0x404`); `CREATE_NO_WINDOW`
    (`0x08000000`) is **not a constant anywhere in that source**. Those flags are
    fatal under a console-less runner and harmless under one that owns a console —
-   so it is the console, not the flag list, that decides. `0.7.x` wrote the
-   two-set version of that list and called the flags "a necessary ingredient ...
-   the host process image is what turns it fatal"; both halves were wrong, and
-   `0.8.0` replaces them.
+   so **there** the console decides. `0.7.x` wrote the two-set version of that
+   list and called the flags "a necessary ingredient ... the host process image is
+   what turns it fatal"; both halves were wrong, and `0.8.0` replaces them.
+
+   **`0.11.0` and earlier concluded too much from those three sets** — "it is the
+   console and not the flag list that decides" — and [`#8336`] measured the case
+   that falsifies it: with a console-owning host, a restricted token and the Low
+   integrity level, varying only the creation flags, `CREATE_NO_WINDOW` and
+   `CREATE_NEW_CONSOLE` both died with `0xC0000142`, while `0`, `DETACHED_PROCESS`
+   and `CREATE_NEW_PROCESS_GROUP` reached the program. So the console decides
+   **whether a flag that merely shares the inherited console is fatal**, and a
+   flag that forces the child to create one of its own is fatal regardless. The
+   pair inside that matrix is what makes it a rule rather than a list of forbidden
+   flags: the same `CREATE_NO_WINDOW` on an *unrestricted* token reached the
+   program, and `STARTF_USESHOWWINDOW` with `SW_HIDE` — how the harness hides a
+   window without isolating a console — was harmless on the restricted one.
+   `0.12.0` replaces the withdrawn sentence with the rule and that matrix.
+
+   **The `windowsHide` suspicion, answered.** It is the first thing a search turns
+   up for this failure, and it points at the wrong component: the flag appears
+   once on the *ordinary* subprocess path
+   (`packages/subprocess/subprocess-local/src/spawn.ts:472`,
+   `windowsHide: platform === 'win32'`), which starts the runner rather than the
+   confined child, and the restricted spawn defines no `CREATE_NO_WINDOW` constant
+   at all. It is **not** set in `dsh-jobs` — a search there finds nothing, and
+   every `windowsHide` in the tree sits on a host-side or ordinary spawn. And
+   where it *is* set, [`#8208`] measured it both ways on a host that works: with
+   and without `windowsHide`, the confined `pwsh` reached exit `0` with its own
+   stdout intact. The reason is the rule again — a windowless console is still a
+   console, and that is what the child inherits; what decides is whether the host
+   owns a console **object**, not whether it owns a window.
 
    **One arm was applied, measured, and rejected.** Putting `DETACHED_PROCESS` on
    the *restricted child* removes its console request and does stop the crash —
@@ -1041,3 +1071,5 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8313]: https://github.com/deepseek-ai/deepseek-harness/discussions/8313
 [#8314]: https://github.com/deepseek-ai/deepseek-harness/discussions/8314
 [#8322]: https://github.com/deepseek-ai/deepseek-harness/discussions/8322
+[#8334]: https://github.com/deepseek-ai/deepseek-harness/discussions/8334
+[#8336]: https://github.com/deepseek-ai/deepseek-harness/discussions/8336

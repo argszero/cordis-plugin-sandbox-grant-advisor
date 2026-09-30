@@ -105,7 +105,7 @@
 # running one.
 #
 # A THIRD family is recognized from a value, not from text (#7876, #7877,
-# #8193, #8208, #8313):
+# #8193, #8208, #8313, #8336, #8334):
 #
 #   [exit code: -1073741502]        (0xC0000142 STATUS_DLL_INIT_FAILED)
 #
@@ -124,7 +124,17 @@
 # or spawned without a console), carries the one conversion the model can make
 # itself (rewrite the work as PowerShell or `cmd`), names the remedy #8193
 # measured — a real node.exe host, which the desktop ships — and says plainly
-# which producers it does not know. Like the second family, it is mode-gated.
+# which producers it does not know. It also states the one rule the whole family
+# follows from, because a reader without it reaches for the wrong flag: in a
+# restricted token a console can be INHERITED but not CREATED, so a creation
+# flag that forces the child to make one of its own — `CREATE_NO_WINDOW`,
+# `CREATE_NEW_CONSOLE` — is fatal on its own, while `DETACHED_PROCESS` (which
+# declines a console rather than creating one) is not; #8336 measured that
+# matrix on one machine, and #8208 measured `windowsHide` both ways on a host
+# that works, so the advisory answers that suspicion with where the flag
+# actually appears — the ordinary subprocess path, not the confined one — and
+# with why a windowless console is still an inheritable console. Like the second
+# family, it is mode-gated.
 #
 # A FOURTH family is the other half of the FIRST one's backend (#423). There the
 # grant could not be applied at all; here it WAS applied — on the workspace root,

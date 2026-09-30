@@ -167,7 +167,13 @@ const MUTATIONS = [
     name: 'the honest boundary drops the piped path, so the flag list reads as two sets instead of three',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    'flags actually passed are three sets and none of them is `CREATE_NO_WINDOW` — `0` on the piped path,',", "    'flags actually passed are two sets and none of them is `CREATE_NO_WINDOW` —',"]],
+    edits: [[
+      "    'The creation flags this harness actually passes are three sets and none of them is `CREATE_NO_WINDOW` —',",
+      "    'The creation flags this harness actually passes are two sets and none of them is `CREATE_NO_WINDOW` —',",
+    ], [
+      "    '`0` on the piped path, `CREATE_SUSPENDED` on the inherited-job path, and',",
+      "    '`CREATE_SUSPENDED` on the inherited-job path, and',",
+    ]],
   },
   {
     name: 'the console mechanism is replaced by the refuted token story',
@@ -363,6 +369,52 @@ const MUTATIONS = [
     edits: [[
       "    '  No repair command is printed here on purpose. This project has no Windows host to verify one on, and shipping',",
       "    '  Repair it from an elevated prompt: `icacls \"<dir>\" /grant \"<account>:(OI)(CI)F\"`. This project has no Windows host to verify one on, and shipping',",
+    ]],
+  },
+  {
+    // 0.11.0's conclusion, restored. It is the specific sentence a reader would
+    // use to rule `CREATE_NO_WINDOW` out, so the guard has to bite on it even
+    // though the surrounding rule survives.
+    name: 'the withdrawn conclusion is restored, so the flag list reads as never decisive',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'a console, so there the console decides. A flag that forces creation is a different animal: it decides even',",
+      "    'a console, so it is the console and not the flag list that decides. A flag that forces creation is a different animal: it decides even',",
+    ]],
+  },
+  {
+    // The matrix is the whole reason the sentence above was wrong: without the two
+    // fatal flags named, the rule has no counterexample and reads as a restatement
+    // of what 0.11.0 already said.
+    name: 'the #8336 matrix is dropped, leaving the rule without the case that falsifies the old sentence',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'Low integrity level, varying only the creation flags: `0`, `DETACHED_PROCESS` and `CREATE_NEW_PROCESS_GROUP`',\n    'all reached the program, while `CREATE_NO_WINDOW` and `CREATE_NEW_CONSOLE` both died with the code above.',",
+      "    'Low integrity level, varying only the creation flags: some reached the program and some did not.',",
+    ]],
+  },
+  {
+    // The suspicion the reports actually reach for. Answering it is the point;
+    // dropping the answer restores the silence that made the reports guess.
+    name: 'the windowsHide answer is dropped, so the suspicion the reports reach for goes unanswered',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'One thing that gets suspected and is not the cause: `windowsHide`. It is named here because it is the',",
+      "    'A note on other flags is omitted here because it is not the cause: `windowsHide`. It is named here because it is the',",
+    ]],
+  },
+  {
+    // The mis-attribution itself: naming `dsh-jobs` is what the reports did, and
+    // the advisory must never repeat it as the place the flag lives.
+    name: 'the windowsHide site is moved to the component the reports blamed',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'confined path above. It appears on the ORDINARY subprocess path (`dsh-subprocess-local`: `windowsHide:`',",
+      "    'confined path above. It appears in the job runner (`dsh-jobs`: `windowsHide:`',",
     ]],
   },
 ]

@@ -817,9 +817,41 @@ test('the Electron host names the console mechanism, both of its shapes, and the
   assert.match(boundary, /`0` on the piped path/)
   assert.match(boundary, /`CREATE_SUSPENDED` on the inherited-job path/)
   assert.match(boundary, /`CREATE_SUSPENDED \| CREATE_UNICODE_ENVIRONMENT` on the ordinary path/)
-  assert.match(boundary, /it is the console and not the flag list that decides/)
   assert.doesNotMatch(boundary, /necessary ingredient/)
   assert.doesNotMatch(boundary, /which is why that backend avoids `CREATE_NO_WINDOW`/)
+  // 0.11.0 and earlier concluded from those three sets that "it is the console
+  // and not the flag list that decides". `#8336` measured a console-owning host
+  // where the flag list decided anyway, so the conclusion is replaced by the
+  // rule plus the matrix that separates the two cases — and the old sentence
+  // must not survive anywhere, because it is the one a reader would use to
+  // rule `CREATE_NO_WINDOW` out.
+  assert.doesNotMatch(boundary, /it is the console and not the flag list that decides/)
+  assert.doesNotMatch(boundary, /so it is the console, not the flag list, that decides/)
+  assert.match(boundary, /a console can be INHERITED but not CREATED/)
+  assert.match(boundary, /anything that forces it to CREATE one is fatal on its own/)
+  // The matrix, with both halves of what makes it a pair: the same flag on an
+  // unrestricted token reached the program, and `SW_HIDE` — how the harness
+  // hides a window without isolating a console — is harmless.
+  assert.match(boundary, /#8336 measured that side directly/)
+  assert.match(boundary, /`DETACHED_PROCESS` and `CREATE_NEW_PROCESS_GROUP` all reached the program/)
+  assert.match(boundary, /while `CREATE_NO_WINDOW` and `CREATE_NEW_CONSOLE` both died with the code above/)
+  assert.match(boundary, /`STARTF_USESHOWWINDOW` with `SW_HIDE`/)
+  assert.match(boundary, /so was `CREATE_NO_WINDOW` on an UNRESTRICTED token/)
+  // Where the console DOES decide, and where it does not — the distinction the
+  // withdrawn sentence flattened.
+  assert.match(boundary, /so there the console decides/)
+  assert.match(boundary, /A flag that forces creation is a different animal/)
+  // The `windowsHide` suspicion is answered rather than ignored, with the
+  // component it actually belongs to and the measurement that clears it.
+  assert.match(boundary, /One thing that gets suspected and is not the cause: `windowsHide`/)
+  assert.match(boundary, /it points at the wrong component/)
+  assert.match(boundary, /the ORDINARY subprocess path/)
+  assert.match(boundary, /`windowsHide:`/)
+  assert.match(boundary, /starts the runner rather than the confined child/)
+  assert.doesNotMatch(boundary, /dsh-jobs/)
+  assert.match(boundary, /measured it both ways on a host that works/)
+  assert.match(boundary, /a windowless console is still a console/)
+  assert.match(boundary, /whether the host owns a console OBJECT, not whether it owns a window/)
   // The rejected arm, with both halves of its measurement: it stops the crash and
   // silently discards the output of the interpreter most likely to be used.
   assert.match(boundary, /applied, measured, and rejected/)
