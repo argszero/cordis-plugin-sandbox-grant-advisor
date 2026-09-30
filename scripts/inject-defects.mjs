@@ -277,10 +277,18 @@ const MUTATIONS = [
     edits: [['(#7638, #8322)', '(#8322)']],
   },
   {
-    name: 'the mount instructions drop the fourth family\'s thread',
+    // Both of the fourth family's threads, not only the first: the family gained a
+    // second report, and a patch that names one of them describes a smaller family
+    // than the plugin covers. Every mention has to go — the id is cited twice, so
+    // removing one of them still leaves the patch naming the thread and reads
+    // SILENT (measured in this round's first version of the arm).
+    name: 'the mount instructions drop the fourth family\'s second thread',
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
-    edits: [["the FIRST one's backend (#423)", "the FIRST one's backend"]],
+    edits: [
+      ["the FIRST one's backend (#423, #8383)", "the FIRST one's backend (#423)"],
+      ["the LABEL branch (#8383, measured on 0.2.0-rc.2 with the decisive", "the LABEL branch (measured on 0.2.0-rc.2 with the decisive"],
+    ],
   },
   {
     // 0.11.0's family is the only Windows-only one that cannot drop its platform
@@ -340,24 +348,62 @@ const MUTATIONS = [
     ]],
   },
   {
-    // From inside a session the DACL variant and the label variant are
-    // indistinguishable, and a reader who repairs the wrong half has learned
-    // nothing — so the second measured variant cannot be dropped.
-    name: 'the label variant of the same shape is dropped, leaving only the DACL half',
+    // The fork, which is the only thing that makes two indistinguishable halves
+    // actionable: breadth is the one fact the reader already owns, and without it
+    // a reader repairs the DACL of a label-starved workspace and learns nothing.
+    name: 'the breadth fork is dropped, so both halves read as one failure',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    // The whole block, not its first line: the variant is four sentences (what is
-    // missing, where it was reported, that the two are indistinguishable from
-    // inside, and the skill that separates them), and a mutation that removes only
-    // the first leaves the other three asserting the same fact — which is exactly
-    // what the first version of this arm did, and why it read SILENT.
     edits: [[
-      "    '  A SECOND measured variant has the same shape and a different object: the coverage that is missing can be the',\n"
-      + "    '  mandatory-integrity LABEL rather than a DACL entry. It was reported in this same thread on 2026-09-29 against a',\n"
-      + "    '  `0.2.0-rc.1` install, under the same root-only short-circuit. Inside a session the two are indistinguishable;',\n"
-      + "    '  from outside, the repository\\'s own diagnosis skill separates them — `diagnose-windows-sandbox-acl` (0.2.0 and',\n"
-      + "    '  later) reports `hasExactDeny()` for the DACL half and `LOW_LABEL` (`S-1-16-4096`) for the label half.',",
-      "    '  There is nothing else to check here: the DACL half is the whole of this failure.',",
+      "    '  - A HANDFUL of stubborn objects while the rest of the tree writes normally → the DACL half. The capability ACE',\n"
+      + "    '    did not arrive at those objects; the workspace is otherwise usable. This is the #423 measurement.',\n"
+      + "    '  - NOTHING below the root is writable at all, with the root itself the only writable place → the LABEL half',",
+      "    '  - Some objects stay stubborn while the rest of the tree writes normally; the capability ACE did not arrive at',\n"
+      + "    '    those. Everything below is about that half.',",
+    ]],
+  },
+  {
+    // From inside a session the DACL miss and the label miss are
+    // indistinguishable, and a reader who repairs the wrong half has learned
+    // nothing — so the second branch cannot be dropped back to a footnote.
+    name: 'the label half is demoted back to a footnote, leaving the DACL as the whole failure',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'Half two — the DACL arrived and the LABEL did not (#8383, measured 2026-09-30):',",
+      "    'There is nothing else to check here: the DACL half is the whole of this failure.',",
+    ]],
+  },
+  {
+    // The label half's permanence, which is the same root-only short-circuit on
+    // the other half of the same call. The claim is a statement about the
+    // backend, so the mechanism and its check names have to be in the text.
+    name: 'the label half loses its permanence mechanism, so it reads as a transient miss',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  Why it is permanent: the label goes out in the same single security-descriptor write that carries the grant,',\n"
+      + "    '  with the inheritance flag set, but only on the paths the backend enumerates — the workspace root (plus the',\n"
+      + "    '  session\\'s private temp directory), with no descendant walk. The root-only idempotency check then requires the',\n"
+      + "    '  grant, the world delete-child deny AND the exact label (`hasExactGrant()` + `hasExactDeny()` + `hasExactLabel()`',\n"
+      + "    '  all matching) before it returns early, so once the root is labelled the propagation is never attempted again and',\n"
+      + "    '  the children that missed it are never revisited — the same root-only short-circuit as the DACL half, on the',\n"
+      + "    '  other half of the same call (`packages/sandbox/sandbox-windows-acl/src/acl.ts`: the guard at :386-388, the',\n"
+      + "    '  label read at :198-204).',",
+      "    '  Why it is permanent: the label is applied to the workspace root and the children are expected to inherit it.',",
+    ]],
+  },
+  {
+    // The one form of the measurement that decides it. A grandchild proves
+    // nothing — inheritance is per-parent — and a text that accepts one would be
+    // inviting the reader to confirm the branch with evidence that cannot.
+    name: 'the decisive control is weakened to any descendant, so a grandchild reads as evidence',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  keeping: a GRANDCHILD directory having no label proves nothing on its own, because inheritance is per-parent and',\n"
+      + "    '  the intermediate directory carries none — only a DIRECT child of the labelled root is evidence.',",
+      "    '  keeping: any directory below the root that carries no label is evidence of this half.',",
     ]],
   },
   {

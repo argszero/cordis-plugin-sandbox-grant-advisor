@@ -318,7 +318,12 @@ test('a configured href replaces the thread line in this family as well', async 
     const body = contexts(await call(ctx, 'bash', WRITE_INSIDE))[0].content.map(block => block.text).join('\n')
     assert.match(body, /tracked upstream: https:\/\/example\.invalid\/t\/423/)
     assert.doesNotMatch(body, /tracked upstream \(discussion/)
-    assert.match(body, new RegExp(`${WORKSPACE_DENIAL_DISCUSSIONS} measured 170 of 729`), 'the measurements keep their reference')
+    assert.match(body, /#423 measured 170 of 729/, 'the measurements keep their reference, which the href cannot replace')
+    assert.match(body, /#8383/, 'and the branch the second report measured keeps its own id')
+    const citations = body.match(/#\d+/g) ?? []
+    for (const id of WORKSPACE_DENIAL_DISCUSSIONS.match(/#\d+/g) ?? []) {
+      assert.ok(citations.includes(id), `an href replaced the thread line and dropped ${id}`)
+    }
   })
 })
 

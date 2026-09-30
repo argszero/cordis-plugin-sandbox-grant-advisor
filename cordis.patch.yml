@@ -136,18 +136,19 @@
 # with why a windowless console is still an inheritable console. Like the second
 # family, it is mode-gated.
 #
-# A FOURTH family is the other half of the FIRST one's backend (#423). There the
-# grant could not be applied at all; here it WAS applied — on the workspace root,
-# once — and Windows ACE inheritance silently skipped the objects whose DACL the
-# caller could not write, so commands writing into a subdirectory created or moved
-# in from outside (an installer, an editor, another harness under its own account)
-# are denied forever while the same command against a directory the harness itself
-# created succeeds. The backend's provisioning check short-circuits on the root
-# (`hasExactGrant` returns early once the root carries the ACE), so those
-# descendants are never revisited. It is read from a value rather than from text,
-# like the third family and for the same reason (a denial exits nonzero and the
-# shipped shell tools report that as a finished run), but it needs no bespoke code:
-# the executors stamp the denial onto the value as
+# A FOURTH family is the other half of the FIRST one's backend (#423, #8383).
+# There the grant could not be applied at all; here it WAS applied — on the
+# workspace root, once — and Windows ACE inheritance silently skipped the objects
+# whose DACL the caller could not write, so commands writing into a subdirectory
+# created or moved in from outside (an installer, an editor, another harness
+# under its own account) are denied forever while the same command against a
+# directory the harness itself created succeeds. The backend's provisioning check
+# short-circuits on the root (the grant, the world delete-child deny and the
+# exact label must all match before it returns early), so those descendants are
+# never revisited. It is read from a value rather than from text, like the third
+# family and for the same reason (a denial exits nonzero and the shipped shell
+# tools report that as a finished run), but it needs no bespoke code: the
+# executors stamp the denial onto the value as
 #
 #   sandbox: { mode: "workspace-write", denied: true }
 #
@@ -157,16 +158,32 @@
 # absolute path the command names lies inside the session's workspace: a denial
 # anywhere else (outside the workspace, under `read-only`, a runner failure) is
 # the sandbox working as designed and is left alone. The advisory prints the path
-# it keyed on beside the root it tested it against, says that retrying is provably
-# useless, gives the DISCRIMINATOR — reading/listing use the normal token while
-# writing/deleting use the restricted one, and both sides must pass, so an object
-# whose DACL names only Administrators/SYSTEM plus the capability SID looks granted
-# to a check that just greps for the SID — names the second measured variant of
-# the same shape (the coverage missing on the mandatory-integrity LABEL rather
-# than on the DACL, separated from outside a session by the repository's own
-# `diagnose-windows-sandbox-acl`), and states the Windows ceiling that closes the
-# obvious repair (a recursive `icacls /grant` for a capability SID is refused with
-# ERROR_NONE_MAPPED (1332), because that SID has no name to map). It ships NO
+# it keyed on beside the root it tested it against and says that retrying is
+# provably useless — and then, before any check, forks the diagnosis on BREADTH,
+# the one fact the reader already owns:
+#
+#   - a HANDFUL of stubborn objects while the rest of the tree writes normally →
+#     the DACL branch (#423: the capability ACE did not arrive at those objects),
+#     with the two-sided discriminator that a single check gets wrong — reading
+#     and listing use the normal token while writing and deleting use the
+#     restricted one, so an object whose DACL names only Administrators/SYSTEM
+#     plus the capability SID looks granted to a check that merely greps for the
+#     SID;
+#   - NOTHING below the root writable at all, the root itself the only writable
+#     place → the LABEL branch (#8383, measured on 0.2.0-rc.2 with the decisive
+#     control of a directory created after the grant): the DACL is present and
+#     inherits correctly at every level while the Low mandatory-integrity label
+#     never reaches the children, so the kernel's no-write-up check refuses the
+#     Low-integrity child before the ACL is ever consulted — same permanent shape
+#     (the label goes out in the same single security-descriptor write as the
+#     grant, only on the paths the backend enumerates, with no descendant walk),
+#     separable from outside a session by the repository's own
+#     `diagnose-windows-sandbox-acl` and its `LOW_LABEL` (`S-1-16-4096`) report.
+#
+# It also states the Windows ceiling that closes the obvious repair (a recursive
+# `icacls /grant` for a capability SID is refused with ERROR_NONE_MAPPED (1332),
+# because that SID has no name to map; and a manually widened DACL does not clear
+# the label half either, because the refusal precedes the ACL). It ships NO
 # repair command, for the reason the standing-grant section ships none: this
 # project has no Windows host to verify a line on.
 

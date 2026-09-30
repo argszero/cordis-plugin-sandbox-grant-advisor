@@ -653,7 +653,7 @@ the single shape that happened to be measured first. It never
 offers `danger-full-access` as a fix and never suggests a sandbox setting be
 relaxed.
 
-### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0)
+### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0; the two branches it forks into in 0.13.0)
 
 [#423] is one report and its own follow-up, and it is the **other end of the
 backend §1 is about**. There the workspace grant could not be applied at all and
@@ -707,14 +707,38 @@ reading of its own sandbox, not a guess about a line of output.
   `Administrators`/`SYSTEM` plus the capability SID is refused on the read side
   too, and looks fine to a check that merely greps for the capability SID.
   [#423] measured exactly that on a `.cache` directory.
-- **The second measured variant of the same shape.** The coverage that is
-  missing can be the mandatory-integrity **label** rather than a DACL entry —
-  reported in the same thread on 2026-09-29, against a `0.2.0-rc.1` install,
-  under the same root-only short-circuit. From inside a session the two are
-  indistinguishable; from outside, the repository's own diagnosis skill
-  separates them (`diagnose-windows-sandbox-acl`, 0.2.0 and later, reports
-  `hasExactDeny()` for the DACL half and `LOW_LABEL` — `S-1-16-4096` — for the
-  label half).
+- **The fork, and the second branch** (added in 0.13.0, from [#8383]). The
+  grant and the mandatory-integrity **label** go out in the same single
+  security-descriptor write, and that write lands on the workspace root (plus
+  the session's private temp directory) with **no descendant walk** — so the
+  label half can fail to reach the tree while the DACL half arrives at every
+  level, and it produces the identical denial. The backend's root-only
+  idempotency check then requires the grant, the world delete-child deny **and**
+  the exact label (`hasExactGrant()` + `hasExactDeny()` + `hasExactLabel()` all
+  matching, `acl.ts:386-388`, label read at `:198-204`) before it returns early,
+  so once the root is labelled the propagation is never attempted again and an
+  unlabelled child is never revisited — the same root-only short-circuit as the
+  DACL half, on the other half of the same call. From inside a session the two
+  are indistinguishable, so the advisory forks them on **breadth**, the one fact
+  the reader already owns: a **handful** of stubborn objects while the rest of
+  the tree writes normally is the DACL branch, and **nothing below the root
+  writable at all**, with the root itself the only writable place, is the label
+  branch. A Low-integrity child may write to a directory only if that
+  directory's own label is Low — the kernel's no-write-up check runs *in
+  addition to* the access check — so a DACL that is perfect everywhere changes
+  nothing. [#8383] measured it on `0.2.0-rc.2` with the decisive control of a
+  directory created **after** the grant: it inherits the capability ACE marked
+  `(I)` and still gets no label. (The report's own care is worth keeping: a
+  *grandchild* directory having no label proves nothing, because inheritance is
+  per-parent and the intermediate directory carries none — only a **direct**
+  child of the labelled root is evidence.) From outside a session the
+  repository's own diagnosis skill separates the halves
+  (`diagnose-windows-sandbox-acl`, 0.2.0 and later, prints the owner, the
+  caller's rights and `WRITE_DAC`/`WRITE_OWNER` for the DACL half and `LOW_LABEL`
+  — `S-1-16-4096` — for this one). And a widened DACL does not clear it either,
+  because the refusal precedes the ACL: [#8383] confirmed that adding an
+  explicit `FullControl` entry for the user on a subdirectory still left the
+  write denied.
 - **No repair command.** The obvious one, a recursive `icacls /grant` for the
   capability SID, is refused by Windows itself with `ERROR_NONE_MAPPED` (1332) —
   the tool cannot map that SID to a name, so a grant that must name it never
@@ -1073,3 +1097,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8322]: https://github.com/deepseek-ai/deepseek-harness/discussions/8322
 [#8334]: https://github.com/deepseek-ai/deepseek-harness/discussions/8334
 [#8336]: https://github.com/deepseek-ai/deepseek-harness/discussions/8336
+[#8383]: https://github.com/deepseek-ai/deepseek-harness/discussions/8383

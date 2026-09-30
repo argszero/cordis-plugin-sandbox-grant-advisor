@@ -1015,13 +1015,23 @@ test('the workspace-denial advisory shows its work, and prints no repair command
   assert.match(flat, /NORMAL token/)
   assert.match(flat, /RESTRICTED/)
   assert.match(flat, /Administrators\/SYSTEM/)
-  // The label variant of the same shape, and the tool that separates them.
+  // The two branches of the same shape, the fork between them, and the tool that
+  // separates them from outside a session.
+  assert.match(flat, /BREADTH IS THE FIRST CUT/)
+  assert.match(flat, /A HANDFUL of stubborn objects while the rest of the tree writes normally → the DACL half/)
+  assert.match(flat, /NOTHING below the root is writable at all[^.]*→ the LABEL half/)
+  assert.match(flat, /Half one — the DACL ACE did not reach the object/)
+  assert.match(flat, /Half two — the DACL arrived and the LABEL did not \(#8383, measured 2026-09-30\)/)
+  // The second branch's own mechanism: the same root-only short-circuit, on
+  // the label half of the same call.
+  assert.match(flat, /the same single security-descriptor write that carries the grant/)
+  assert.match(flat, /`hasExactGrant\(\)` \+ `hasExactDeny\(\)` \+ `hasExactLabel\(\)`\s*all matching/)
+  assert.match(flat, /the guard at :386-388, the\s*label read at :198-204/)
+  assert.match(flat, /only a DIRECT child of the labelled root is evidence/)
   assert.match(flat, /mandatory-integrity LABEL/)
-  assert.match(flat, /2026-09-29/)
   assert.match(flat, /diagnose-windows-sandbox-acl/)
   assert.match(flat, /LOW_LABEL/)
   assert.match(flat, /S-1-16-4096/)
-  assert.match(flat, /hasExactDeny\(\)/)
   // The Windows ceiling that closes the obvious repair.
   assert.match(flat, /ERROR_NONE_MAPPED \(1332\)/)
   // The sanctioned retry is named, so the model is not nudged into it blind.
@@ -1058,9 +1068,15 @@ test('the fourth family names itself, and borrows none of the other three storie
   assert.match(linked, /tracked upstream: https:\/\/example\.invalid\/t\/423/)
   assert.doesNotMatch(linked, /tracked upstream \(discussion/)
   // Only the thread LINE moves. This family is one thread, so unlike the others
-  // its id is also the reference beside the measurements it quotes — and those
-  // citations are what a reader follows to check the numbers, so they stay.
-  assert.match(linked, new RegExp(`${WORKSPACE_DENIAL_DISCUSSIONS} measured 170 of 729`))
+  // its ids are also the reference beside the measurements two reports contributed
+  // — and those citations are what a reader follows to check the numbers, so they
+  // stay: #423 beside its own 170-of-729 count, #8383 on the branch it measured.
+  assert.match(linked, /#423 measured 170 of 729/)
+  assert.match(linked, /#8383/)
+  const citations = linked.match(/#\d+/g) ?? []
+  for (const id of WORKSPACE_DENIAL_DISCUSSIONS.match(/#\d+/g) ?? []) {
+    assert.ok(citations.includes(id), `an href replaced the thread line and dropped ${id}, which the measurements cite`)
+  }
 })
 
 test('the four families share no message: each producer\'s input reaches exactly one classifier', () => {
