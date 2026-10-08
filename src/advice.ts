@@ -86,18 +86,31 @@
  *   (session mode × host) rather than intermittent, and offers the console-owning
  *   host as a user-side option `#8313` measured working.
  * - **The native-init death** (`native-init`) is the one whose remedy is **split**:
- *   the *class* is not the model's to fix, but one of its two measured producers
- *   is. A confined child that died with `STATUS_DLL_INIT_FAILED` never ran
+ *   the *class* is not the model's to fix, but one of its producers is. A confined
+ *   child that died with `STATUS_DLL_INIT_FAILED` never ran
  *   anything, so retrying the same call is pure waste — but if the program that
  *   could not start was an MSYS2/Git-Bash one, the same work expressed with
  *   PowerShell or `cmd` runs fine under the identical mode, and the model *can*
  *   make that change because the model is the one that wrote the command. So the
  *   advice carries a stop instruction, the one in-session conversion, and the
- *   user-side remedy for the other producer. What it deliberately does **not** do
- *   is guess which producer this is: the code alone cannot say, and the two
- *   checks it hands over are facts the reader holds (what program they ran;
- *   whether this is the packaged desktop app, which the plugin reports rather
- *   than assumes). That Electron host was shipped as **two measurements**; since
+ *   user-side remedy for the others. What it deliberately does **not** do
+ *   is guess which producer this is: the code alone cannot say, and the checks it
+ *   hands over are facts the reader holds (what program they ran; whether this is
+ *   the packaged desktop app, which the plugin reports rather than assumes;
+ *   whether the same command runs under `read-only`).
+ *   Since `0.16.0` there are **three** producers, and the third arrived with the
+ *   discriminator the first two lacked: `#9186` isolated it to a single input by
+ *   driving the sandbox API with the DACLs untouched, and the input is the
+ *   restricted token's own restricting list — a capability SID in it kills every
+ *   program, `whoami.exe` and `cmd.exe` included, while the `read-only` list
+ *   (no capability SID) starts them normally. That is a one-setting comparison
+ *   rather than a debugging session, and it is the answer to the one thing the
+ *   status code cannot tell: the same `0xC0000142` is also produced by a token
+ *   built **without** the logon-SID/EVERYONE keep-alive pair, so the code cannot
+ *   name its own direction. The control arm also retires the `.NET self-contained`
+ *   cause the earlier reports converged on, because pure-native programs die
+ *   identically.
+ *   That Electron host was shipped as **two measurements**; since
  *   0.8.0 it is **one mechanism, named**: the runner must own a *console* for the
  *   confined child to inherit, and when it owns none the child's own console
  *   request is denied under the restricted token (`#8208` traced it to
@@ -226,9 +239,12 @@ export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / 
  * discriminator); `#8322` is the one that separated the arms inside a confining
  * mode and found the sandbox runner's host binary — same runner, same ConPTY,
  * console-subsystem `node.exe` host works where a GUI-subsystem one dies
- * silently — which is why the advisory names the host as well as the mode.
+ * silently — which is why the advisory names the host as well as the mode; and
+ * `#9170` supplies that comparison from the user's own side: the same confined
+ * command works under the console-owning host the Web UI provides and fails
+ * under the packaged desktop app, with the mode and the command held fixed.
  */
-export const PTY_DISCUSSIONS = '#7638 / #8322'
+export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
 
 /**
  * The upstream threads the native-init-death advisory is a stopgap for.
@@ -236,9 +252,19 @@ export const PTY_DISCUSSIONS = '#7638 / #8322'
  * `#8313` is the fifth report of the same code and the one that states the host
  * difference from the outside: the desktop build fails where the same version
  * launched from a terminal does not, which is the same variable the PTY family
- * now names.
+ * now names. `#8336` and `#8334` measured the creation-flag list and answered the
+ * `windowsHide` suspicion for that producer.
+ *
+ * The three later threads are the second producer's opposite number, and they
+ * arrived as a cluster on three different Windows builds: `#8990` and `#8991`
+ * (the same code, with no dependence on the PowerShell version or the install
+ * layout) whose producers nobody had identified, then `#9186`, which isolated it
+ * to a single input — the restricted token's own restricting list — and is the
+ * reason the advisory carries a third producer at all. Its control arm also
+ * retires the `.NET self-contained` cause the earlier threads attracted: a
+ * pure-native `whoami.exe` and `cmd.exe` die exactly as `pwsh` does.
  */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'
 
 /**
  * The upstream threads the workspace-denial advisory is a stopgap for.
@@ -752,7 +778,7 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
  * start), hand the model a command to run (there may be no working shell to run
  * it in — that is what died), or assert which producer this is. The code is a
  * loader status and says nothing about the sandbox by itself, so the diagnosis
- * is the *class* ("the process never started") plus the two producers that have
+ * is the *class* ("the process never started") plus the producers that have
  * been measured under this harness, each with the check that distinguishes it.
  * One of those checks the plugin answers itself and reports as a fact — whether
  * this process is an Electron binary — rather than assuming, because a reader
@@ -786,7 +812,14 @@ function nativeInitAdvisory(
     'says "sandbox" by itself; what makes the sandbox a candidate is the mode above, under which every',
     'command is spawned through the ACL runner.',
     '',
-    'Two producers have been measured under a confining Windows mode. Check which one this is:',
+    'Why the conversation got only a number: upstream admits a failure as the RUNNER\'s own only at exit 127 with',
+    'a `windows-acl-run: <detail>` line on stderr. This failure is not that — the runner returns normally and the',
+    'CHILD is killed by the loader — so the code passes through as an ordinary nonzero exit status, which the',
+    'renderer reports without marking the result an error. It is therefore not a swallowed sandbox diagnostic:',
+    'it never enters that classification at all. On the persistent-PTY path it is thinner still — the shell layer',
+    'throws a fixed sentence with no status in it, so the code does not reach the conversation even as a number.',
+    '',
+    'Three producers have been measured under a confining Windows mode. Check which one this is:',
     '  1. An MSYS2 / Git-Bash program — `bash.exe`, `sh.exe`, or anything from a Git for Windows or MSYS2',
     '     distribution. Under the restricted token its runtime cannot create the pipe it uses for signals,',
     '     and it aborts in the loader phase (`couldn\'t create signal pipe, Win32 error 5`), while `cmd.exe`',
@@ -806,10 +839,11 @@ function nativeInitAdvisory(
     '         console, because `DETACHED_PROCESS` was set: `spawnSync(node, [runner, …], { detached: true })`',
     '         returns `0xC0000142` while the same call without that flag returns `0` (#8208). That arm needs no',
     '         desktop and no particular machine, so it is the check worth running here.',
-    '     What is NOT the discriminator: the token. #8208 compared `whoami /groups` and `/priv` from children of',
-    '     a working node host and of the failing Electron host — identical, down to the group count and session —',
-    '     and a low-integrity `cmd.exe` runs fine on that machine, so neither the token nor low integrity alone',
-    '     explains this.',
+    '     What is NOT the discriminator here: this token\'s GROUPS, PRIVILEGES and INTEGRITY LEVEL. #8208 compared',
+    '     `whoami /groups` and `/priv` from children of a working node host and of the failing Electron host —',
+    '     identical, down to the group count and session — and a low-integrity `cmd.exe` runs fine on that machine,',
+    '     so neither the token\'s groups nor low integrity alone explains this. That says nothing about which SIDs',
+    '     the token was RESTRICTED to, which is a different member of the same object and producer 3 below.',
     ...(onElectron
       ? [
           '     This process IS an Electron binary (`process.versions.electron` is set), so a GUI-subsystem host',
@@ -839,9 +873,23 @@ function nativeInitAdvisory(
           '     Node binary here and a GUI-subsystem host cannot be the cause. One measured shape is still open: a',
           '     runner that owns no console because it was spawned with `DETACHED_PROCESS` fails exactly this way on a',
           '     real node host too (#8208) — that is a property of how this host was launched, not of the build. If the',
-          '     program was not an MSYS2 one either, and the runner was not spawned detached, this failure is outside',
-          '     both measured producers: stop and hand it to the user.',
+          '     program was not an MSYS2 one either, and the runner was not spawned detached, producer 2 does not',
+          '     apply here: run producer 3\'s mode switch below, and if that does not separate it either, stop and',
+          '     hand it to the user.',
         ]),
+    '  3. A capability SID inside the restricted token\'s own restricting list (#9186). It isolated this to that',
+    '     single input by driving the sandbox API directly, with the runner hosted by a real node binary and the',
+    '     DACLs left untouched: with the `workspace-write` restricting list — `[logon SID, EVERYONE]` plus one',
+    '     capability SID — EVERY program died this way (`whoami.exe` and `cmd.exe` as well as `pwsh`), while the',
+    '     `read-only` list, which carries no capability SID, started the same program normally in both stdio',
+    '     shapes (piped and inherited). The capability SIDs are derived per workspace and per private temp',
+    '     directory, and they join the list only under `workspace-write`; `read-only` carries none by design.',
+    '     CHECK: hold the command and the tool fixed and change only the MODE. If `read-only` starts the command',
+    '     that `workspace-write` kills, this is the producer — one switch, no debugging tools, and it is the only',
+    '     discriminator this status code does not already give you (see the boundary below). If both modes fail,',
+    '     the difference is elsewhere and this is producer 2 (the host) or a cause outside the list entirely.',
+    '     One thing this is NOT: `.NET`. Pure-native programs die here identically, so the "self-contained .NET',
+    '     runtime" cause the earlier reports attracted is retired by that control arm.',
     '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',
     'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
@@ -858,6 +906,12 @@ function nativeInitAdvisory(
     '`STARTF_USESHOWWINDOW` with `SW_HIDE` — how a window is hidden without isolating a console — was harmless,',
     'and so was `CREATE_NO_WINDOW` on an UNRESTRICTED token, which is what makes the two a pair rather than a',
     'list of forbidden flags.',
+    'The same code runs in BOTH directions, which is why it cannot name its own cause: the restricted-token',
+    'layer records that a token built WITHOUT the logon-SID + EVERYONE keep-alive pair also dies in early DLL',
+    'init with exactly this status (and `pwsh` earlier still, in its CNG path, as `0xE0434352`). Too few entries',
+    'in the restricting list and too many — producer 3 — land on the same `0xC0000142`, so the status alone',
+    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one is producer 3\'s mode',
+    'switch.',
     'The creation flags this harness actually passes are three sets and none of them is `CREATE_NO_WINDOW` —',
     '`0` on the piped path, `CREATE_SUSPENDED` on the inherited-job path, and',
     '`CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the ordinary path (that constant is not defined anywhere',
@@ -938,6 +992,13 @@ function ptyAdvisory(failure: PtyStartupFailure, mode: SandboxModeName, tool?: s
     'whose stream recorded the confining mode keeps failing',
     'after the app is restarted with a different mode in the environment, while switching it inside that session',
     'takes effect immediately (#8322).',
+    '',
+    'There is a second, cheaper split when the host is already a real `node.exe`, and it costs one setting: change',
+    'only the MODE. A machine where the same console-owning host dies under `workspace-write` and starts the shell',
+    'under `read-only` is the restricting-list arm the `0xC0000142` advisory describes as its producer 3 (#9186); a',
+    'machine where the packaged desktop app fails while the Web UI works under the same confining mode is the host',
+    'arm above (#9170). Neither comparison needs a debugger, a second machine, or a reading of any log — and',
+    '`read-only` is a control here rather than a remedy, since it takes the workspace write access away with it.',
     '',
     'Do NOT retry, and do not look for a command that fixes it: every attempt will fail identically, and there is no',
     'shell to run a command in. Use your file read/write tools instead, and hand the choice below to the user.',

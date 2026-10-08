@@ -11,8 +11,9 @@
  *    is what this plugin shipped before `0.6.0` — cannot see this failure at all,
  *    so the arm that matters is the one where `result.isError === false` and the
  *    notice still rides `additionalContexts`.
- * 2. **The sandbox mode is still the gate.** Both producers of the code need the
- *    restricted token to happen, so a non-confining mode must withhold and say so.
+ * 2. **The sandbox mode is still the gate.** The code means this family only
+ *    under a confining mode, where the harness spawns through the restricted-token
+ *    runner, so a non-confining mode must withhold and say so.
  *
  * The values are built by `test/foreground.mjs` from the reports' own numbers
  * (`#7876`, `#7877`): `-1073741502` and the MSYS2 stderr line.
@@ -171,9 +172,9 @@ test('an exit code the producer does not call an error is left alone', async () 
 })
 
 test('the MSYS2 producer keeps its own stderr, and the Electron one carries none', async () => {
-  // The two producers are visibly different in this one respect, and the plugin
-  // must not confuse the value with its stderr: the same code with output is
-  // still the same class of failure.
+  // The MSYS2 producer is visibly different from the others in this one respect,
+  // and the plugin must not confuse the value with its stderr: the same code with
+  // output is still the same class of failure.
   const withOutput = await deathWorld(undefined, { value: foreground(NATIVE_DEATH, MSYS2_STDERR) })
   const noOutput = await deathWorld(undefined, { value: foreground(NATIVE_DEATH) })
   const one = contexts(await call(withOutput.ctx, 'pwsh', { command: 'bash -c echo' }))
@@ -242,10 +243,29 @@ test('a configured href replaces the thread line in this family as well', async 
   })
   const body = contexts(await call(ctx, 'pwsh', { command: 'x' }))[0].content.map(block => block.text).join('\n')
   assert.match(body, /tracked upstream: https:\/\/example\.invalid\/t\/11/)
-  // Only the thread *line* moves: the two producers keep their own references,
+  // Only the thread *line* moves: the producers keep their own references,
   // because a reader who wants the measurements needs the thread, not the line.
   assert.doesNotMatch(body, /tracked upstream \(discussions/)
   assert.match(body, /\(#7877\)/)
   assert.match(body, /\(#8193\)/)
   assert.match(body, /\(#8208\)/)
+  assert.match(body, /\(#9186\)/)
+})
+
+test('the third producer is a fact about the mode, so the comparison is handed over, not asserted', async () => {
+  // #9186's producer is the restricted token's own restricting list, and that list
+  // is built from the mode: `read-only` carries no capability SID and
+  // `workspace-write` does. The plugin cannot read the list, so it does the one
+  // thing it can — it names the producer and hands the reader the comparison,
+  // holding the command and the tool fixed and changing only the mode. Both
+  // confining modes are therefore advised with the same text; only a non-confining
+  // mode withholds. The report's own arm ran `whoami.exe` and `cmd.exe` as well as
+  // `pwsh`, which is what retires the `.NET self-contained` cause.
+  const readOnly = await deathWorld(undefined, { mode: 'read-only' })
+  const body = contexts(await call(readOnly.ctx, 'pwsh', { command: 'whoami.exe' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /#9186/)
+  assert.match(body, /CHECK: hold the command and the tool fixed and change only the MODE/)
+  assert.match(body, /every program died this way/i)
+  assert.match(body, /retired by that control arm/)
 })

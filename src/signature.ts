@@ -85,19 +85,29 @@
  * ## The process that never started (`native-init`)
  *
  * The third family is not a message at all: it is a **structured exit code on a
- * result the pipeline calls a success**. Two reports of one code —
+ * result the pipeline calls a success**. Reports of one code —
  * `STATUS_DLL_INIT_FAILED`, `0xC0000142`, seen as `-1073741502` in a tool result
  * because Windows exit codes are 32-bit NTSTATUS values and Node reports them
  * signed — describe a confined child that died while its native images were
- * initializing, i.e. before its entry point. `#7876` is the packaged desktop app:
- * `sandbox-local` starts the sandbox runner as `[process.execPath, entry]`, and
- * in that build `process.execPath` is the Electron executable, which starts as an
- * *app* unless `ELECTRON_RUN_AS_NODE=1` is in the child's environment — so the
- * runner itself never runs and every confined command reports this code with no
- * output at all. `#7877` is an MSYS2/Git-Bash program under the restricted
- * token: bash cannot create its own signal pipe (`couldn't create signal pipe,
- * Win32 error 5`) and aborts in the same place, while `cmd.exe` and `pwsh` run
- * fine under the identical mode.
+ * initializing, i.e. before its entry point. Three producers have been measured.
+ * `#7877` is an MSYS2/Git-Bash program under the restricted token: bash cannot
+ * create its own signal pipe (`couldn't create signal pipe, Win32 error 5`) and
+ * aborts in the same place, while `cmd.exe` and `pwsh` run fine under the
+ * identical mode. `#8193` and `#8208` are the sandbox runner's own console: the
+ * confined child inherits one from the runner, a restricted token may inherit a
+ * console but not create one, so a runner that owns none — a GUI-subsystem image,
+ * or a real `node.exe` spawned with `DETACHED_PROCESS` — leaves the child asking
+ * for one of its own and dying here. `#9186` is the restricted token's own
+ * restricting list: one capability SID in it kills every program, `whoami.exe`
+ * and `cmd.exe` included, while the `read-only` list — which carries no capability
+ * SID — starts them normally, and that mode switch is the one comparison the code
+ * cannot supply, because too few entries in the list land on the same value. What
+ * `#7876`, the first report, said about it is **withdrawn**: the desktop sets
+ * `ELECTRON_RUN_AS_NODE=1` on its own host child
+ * (`apps/desktop/src/host-process.ts` -> `desktopNodeEnvironment()`), so nothing
+ * on the runner path fails to start for want of that variable, and the token
+ * groups/privileges a later version blamed were measured identical between a
+ * working and a failing host.
  *
  * **This family is the only one that is invisible from the error path**, and that
  * is the whole reason it is classified from the canonical value instead of from

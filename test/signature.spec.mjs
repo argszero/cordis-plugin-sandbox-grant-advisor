@@ -700,7 +700,7 @@ test('a value that is not the shipped foreground projection is refused', () => {
   }
 })
 
-test('the native-init advisory names the class, both producers, and their checks', () => {
+test('the native-init advisory names the class, all three producers, and their checks', () => {
   const failure = classifyNativeInitDeath(foreground(NATIVE_DEATH, MSYS2_STDERR))
   assert.ok(failure)
   const text = advisoryText(failure, { mode: 'read-only', tool: 'pwsh', electronHost: false })
@@ -718,7 +718,7 @@ test('the native-init advisory names the class, both producers, and their checks
   assert.match(flat, /Nothing in the code says "sandbox" by itself/)
   // It enumerates rather than asserts: the header is the claim that this is a
   // list to be checked, not a cause that was identified.
-  assert.match(flat, /Two producers have been measured under a confining Windows mode\. Check which one this is:/)
+  assert.match(flat, /Three producers have been measured under a confining Windows mode\. Check which one this is:/)
   // Producer 1: the MSYS2 runtime, with the report's own line and the one
   // conversion the model can actually make.
   assert.match(flat, /couldn't create signal pipe, Win32 error 5/)
@@ -738,9 +738,10 @@ test('the native-init advisory names the class, both producers, and their checks
   // check that needs no desktop and no particular machine.
   assert.match(flat, /spawnSync\(node, \[runner, …\], \{ detached: true \}\)/)
   assert.match(flat, /needs no desktop and no particular machine/)
-  // The discriminator 0.7.x named is refuted by measurement, and the text says so
-  // rather than quietly dropping it.
-  assert.match(flat, /What is NOT the discriminator: the token/)
+  // The discriminator 0.7.x named is refuted by measurement for the token's
+  // groups/privileges/integrity, and the text says so rather than quietly
+  // dropping it — while leaving open the one member producer 3 *does* change.
+  assert.match(flat, /What is NOT the discriminator here: this token's GROUPS, PRIVILEGES and INTEGRITY LEVEL/)
   assert.match(flat, /a low-integrity `cmd\.exe` runs fine on that machine/)
   // And the withdrawn cause: "the runner does not start at all" cannot arise in
   // this build, because the desktop starts its own host child with exactly the
@@ -756,6 +757,28 @@ test('the native-init advisory names the class, both producers, and their checks
   assert.match(flat, /This process is NOT an Electron binary/)
   assert.match(flat, /the runner is a real Node binary here/)
   assert.doesNotMatch(flat, /This process IS an Electron binary/)
+  // Producer 3: the restricting list itself, isolated by #9186 to a single input
+  // and given the one comparison the status code cannot supply — hold the command
+  // and the tool fixed and change only the mode.
+  assert.match(flat, /A capability SID inside the restricted token's own restricting list \(#9186\)/)
+  assert.match(flat, /It isolated this to that single input by driving the sandbox API directly/)
+  assert.match(flat, /EVERY program died this way \(`whoami\.exe` and `cmd\.exe` as well as `pwsh`\)/)
+  assert.match(flat, /list, which carries no capability SID, started the same program normally/)
+  assert.match(flat, /the list only under `workspace-write`; `read-only` carries none by design/)
+  assert.match(flat, /CHECK: hold the command and the tool fixed and change only the MODE/)
+  assert.match(flat, /it is the only discriminator this status code does not already give you/)
+  assert.match(flat, /this is producer 2 \(the host\) or a cause outside the list entirely/)
+  // The cause it retires, and the reason the code cannot name its own direction:
+  // too few entries in the restricting list land on the same status as too many,
+  // so no reading of the code alone can separate them.
+  assert.match(flat, /Pure-native programs die here identically/)
+  assert.match(flat, /retired by that control arm/)
+  assert.match(flat, /Too few entries in the restricting list and too many — producer 3 — land on the same/)
+  assert.match(flat, /Only a comparison can, and the cheapest one is producer 3's mode switch/)
+  // The token's groups/privileges answer for producer 2 does not answer for
+  // producer 3, and the text says which member of the token producer 3 changes.
+  assert.match(flat, /That says nothing about which SIDs the token was RESTRICTED to/)
+  assert.match(flat, /a different member of the same object and producer 3 below/)
   // The instruction, and the boundary that keeps the claim honest.
   assert.match(flat, /Do not retry this call/)
   assert.match(flat, /Convert the work only in case 1; otherwise stop and hand it to the user/)
@@ -789,14 +812,16 @@ test('the Electron fact is reported, so the same code reads differently on the t
   assert.equal(tail(onElectron), tail(offElectron))
   // Each branch ends with a next step rather than a dead end: the Electron host
   // is sent to a real node host — the fix #8193 measured, and the one the
-  // reporter asked for — while the other one is told the failure is outside
-  // both measured producers.
+  // reporter asked for — while the other one is told producer 2 does not apply
+  // and sent on to producer 3's mode switch, so the non-Electron branch is not a
+  // closed list either.
   const flatOn = onElectron.replace(/\s+/g, ' ')
   assert.match(flatOn, /dependencies\/node\/bin\/node\.exe/, 'the desktop\'s own standalone node is named')
   assert.match(flatOn, /unpacked `node apps\/cli\/lib\/bin\.js web`/)
   assert.match(flatOn, /`danger-full-access` only CONFIRMS the diagnosis/)
   assert.doesNotMatch(flatOn, /run the same command with `danger-full-access`/, 'the widened mode is no longer the remedy offered')
-  assert.match(offElectron.replace(/\s+/g, ' '), /outside both measured producers/)
+  assert.match(offElectron.replace(/\s+/g, ' '), /producer 2 does not apply here/)
+  assert.match(offElectron.replace(/\s+/g, ' '), /run producer 3's mode switch below/)
   // With no explicit answer the plugin asks the live process, which on the host
   // this suite runs on is not Electron — and says so rather than staying silent.
   assert.match(advisoryText(failure, { mode: 'workspace-write' }), /This process is NOT an Electron binary/)
@@ -821,7 +846,7 @@ test('the Electron host names the console mechanism, both of its shapes, and the
   // short of naming a cause it cannot see.
   assert.match(flat, /One measured shape is still open/)
   assert.match(flat, /fails exactly this way on a real node host too \(#8208\)/)
-  assert.match(flat, /outside both measured producers/)
+  assert.match(flat, /producer 2 does not apply here/)
   const onElectron = advisoryText(failure, { mode: 'workspace-write', electronHost: true }).replace(/\s+/g, ' ')
   assert.match(onElectron, /ONE CONDITION RIDES WITH THAT/)
   assert.match(onElectron, /the runner must be spawned WITH a console/)

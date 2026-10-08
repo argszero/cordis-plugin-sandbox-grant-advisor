@@ -406,6 +406,19 @@ records**, not the one the environment now holds — a session that recorded the
 confining mode keeps failing after the app is restarted with another mode in its
 environment, while switching it inside the session takes effect at once.
 
+**[Discussion #9170]** (added in 0.16.0) supplies that host split from the user's
+own side: on one machine the identical confined command works under `dsh web`
+and fails under the packaged `dsh desktop`, with the mode and the command held
+fixed — the comparison the three most recent `0xC0000142` reports could not make,
+because those machines only ever ran one app. It also corrects the conclusion
+that comparison invites: switching the session to `read-only` is **not** a
+reliable way out, because it goes through the same restricted runner started
+from the same host binary — it changes what is *granted*, not who spawns the
+child — and the one report where `read-only` succeeded while `workspace-write`
+died was driven through the sandbox API from a real `node` host, not from the
+packaged desktop app. Worth one try, not worth counting on; a host that owns a
+console remains the first move.
+
 The advisory that follows is addressed to **two different readers**:
 
 ```
@@ -462,13 +475,16 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Seven reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+Ten reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
 app), [`#8313`] (the same version and the same mode run as the desktop app versus
 the Web UI launched from a terminal, which works), [`#8334`] (the same code with
 the authorization side attached: the grant **succeeded** and every confined child
-still died) and [`#7877`] (MSYS2 / Git
-Bash) — and [`#8208`], which found the mechanism the console cases share, and
-[`#8336`], which measured the creation flags that mechanism turns on. All are `0xC0000142`
+still died), [`#7877`] (MSYS2 / Git
+Bash), [`#8990`] and [`#8991`] (the same code on two more Windows builds, with no
+dependence on the PowerShell version or the install layout, and — for those
+machines — no way to tell which producer it was) and [`#9186`], which isolated it
+to a single input — and [`#8208`], which found the mechanism the console cases
+share, and [`#8336`], which measured the creation flags that mechanism turns on. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
@@ -480,7 +496,7 @@ with its own status and prints its own output; this one produced neither.
 | `pwsh -NoLogo -NoProfile -Command "Write-Output pwsh-ok"` | `pwsh-ok` | 0 |
 | `D:\Git\bin\bash.exe -c "echo bash-ok"` | `couldn't create signal pipe, Win32 error 5` | `-1073741502` |
 
-Two producers have been measured under a confining mode:
+Three producers have been measured under a confining mode:
 
 1. **An MSYS2 / Git-Bash program** ([`#7877`]). The restricted token's runtime
    cannot create the pipe it uses for signals, so bash aborts in the loader
@@ -613,6 +629,37 @@ Two producers have been measured under a confining mode:
    one on the interpreter most likely to be used, so the advisory names it as a
    non-remedy instead of offering it; the runner-side remedies keep the output.
 
+3. **A capability SID inside the restricted token's own restricting list**
+   ([`#9186`], added in 0.16.0). The two producers above are properties of the
+   *program* and of the *host*; this one is a property of the **token**, and that
+   is why it is the hardest to see: the reporter drove the sandbox API directly,
+   with the runner hosted by a real `node` binary and the DACLs left untouched,
+   and held everything fixed but one input — the restricting list the restricted
+   token is built from. With the `workspace-write` list — `[logon SID, EVERYONE]`
+   plus **one capability SID** — *every* program died this way, `whoami.exe` and
+   `cmd.exe` as well as `pwsh`; with the `read-only` list, which carries no
+   capability SID, the same program started normally in both stdio shapes (piped
+   and inherited). The capability SIDs are derived per workspace and per private
+   temp directory and join the list only under `workspace-write`
+   (`sandbox-windows-acl/src/token.ts`: `createRestrictedToken()` is verbatim
+   `read-only ? [logonSid, world] : [logonSid, world, ...writeSids]`), so
+   `read-only` carries none **by design**.
+
+   **The check is a mode switch, and it is the only one this status code does not
+   already give you.** Hold the command and the tool fixed and change only the
+   mode: if `read-only` starts the command that `workspace-write` kills, this is
+   the producer. That is one setting rather than a debugging session — and it is
+   the answer to the one thing `0xC0000142` cannot say, because **the same code
+   runs in both directions**: the restricted-token layer's own docstring records
+   that a token built *without* the logon-SID + EVERYONE keep-alive pair also dies
+   in early DLL init with exactly this status (and `pwsh` earlier still, in its
+   CNG path, as `0xE0434352`). Too few entries in the restricting list and too
+   many land on the same `0xC0000142`, so the code cannot name its own direction;
+   only a comparison can. One thing this is **not**: `.NET`. Pure-native programs
+   die here identically, which retires the "self-contained .NET runtime" cause the
+   earlier reports converged on — that is the report's own control arm, not an
+   assertion of ours.
+
 **Why this family is read from a successful result.** The producer never marks
 it an error, and that is a fact about upstream rather than a choice here:
 `RUNNER_FAILURE_RULES['windows-acl']` admits exactly one code —
@@ -649,11 +696,13 @@ restricted-token runner.
 0xC0000142 is STATUS_DLL_INIT_FAILED: ... this is BEFORE the program's entry point. ...
 Nothing in the code says "sandbox" by itself; what makes the sandbox a candidate is the mode above ...
 
-Two producers have been measured under a confining Windows mode. Check which one this is:
+Three producers have been measured under a confining Windows mode. Check which one this is:
   1. An MSYS2 / Git-Bash program ... (#7877)
      If that is what could not start: write the same work as a PowerShell or `cmd` command instead
-  2. The packaged desktop application's sandbox runner ... (#7876)
-     This process is NOT an Electron binary (`process.versions.electron` is unset), so that producer does not apply here.
+  2. The packaged desktop application's sandbox runner ... (#8193, #8208)
+     This process is NOT an Electron binary (`process.versions.electron` is unset), so producer 2 does not apply here.
+  3. A capability SID inside the restricted token's own restricting list ... (#9186)
+     CHECK: hold the command and the tool fixed and change only the MODE ...
 
 Do not retry this call: the environment has not changed, and the identical call produces the identical code.
 
@@ -1160,7 +1209,8 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.7.1` re-ran all five lines above and `0.9.0` re-ran them again. A
+the plugin, so `0.7.1` re-ran all five lines above, `0.9.0` re-ran them again, and
+`0.16.0` re-ran them a third time (all five `PASS`). A
 line whose probe fails is removed from the range rather than left claimed. The
 scratch tree's resolved versions are the ones to read back when a probe is quoted
 as evidence — the probe script pins them by exact version, and `--keep` leaves the
@@ -1197,7 +1247,9 @@ mutates the decision layer one defect at a time — the mode gate removed, the
 PTY message matched as a substring, the preset remedy pointed back at the dead
 legacy directory, two families collapsed into one bookkeeping slot, the advisory
 delivered per call instead of per agent, the loader-status read moved onto the
-error path, the family keyed on the rendered text — and requires that specific
+error path, the family keyed on the rendered text, the third producer asserted
+rather than handed over as a mode switch, the code said to name its own
+direction, the `.NET` cause left standing — and requires that specific
 arms fail. It reports `SILENT ARMS: none` when every arm bites, restores the
 source in a `finally`, and prints `EQUIVALENT` (with the reason) for a mutation
 the current runtime cannot distinguish rather than counting it as a pass.
@@ -1249,3 +1301,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8421]: https://github.com/deepseek-ai/deepseek-harness/discussions/8421
 [#8426]: https://github.com/deepseek-ai/deepseek-harness/discussions/8426
 [#9175]: https://github.com/deepseek-ai/deepseek-harness/discussions/9175
+[#8990]: https://github.com/deepseek-ai/deepseek-harness/discussions/8990
+[#8991]: https://github.com/deepseek-ai/deepseek-harness/discussions/8991
+[#9186]: https://github.com/deepseek-ai/deepseek-harness/discussions/9186
+[Discussion #9170]: https://github.com/deepseek-ai/deepseek-harness/discussions/9170

@@ -40,20 +40,25 @@
  * `danger-full-access` succeeds, `standard` (one-shot shell) × confining
  * succeeds.
  *
- * **A confined child that never started (native init, `#7876` + `#7877`).** The
- * third family is not a message at all: two reports of one exit code —
- * `0xC0000142` `STATUS_DLL_INIT_FAILED` — describing a child that died while the
- * loader was initializing its native images, before its entry point. In `#7876`
- * the packaged desktop's sandbox runner never runs, because `sandbox-local`
- * starts it as `[process.execPath, entry]` and in that build `process.execPath`
- * is the Electron executable, which starts as an *application* unless the child
- * carries `ELECTRON_RUN_AS_NODE=1` — so every confined command reports this code
- * with no output at all, while the unpacked `node apps/cli/lib/bin.js web` host
- * is unaffected. In `#7877` it is an MSYS2/Git-Bash program: under the restricted
- * token bash cannot create its own signal pipe (`couldn't create signal pipe,
- * Win32 error 5`), so it dies in the same phase, while `cmd.exe` and `pwsh` run
- * fine under the identical mode. Retrying is the one thing that cannot work, and
- * the code tells the model nothing on its own.
+ * **A confined child that never started (native init, `#7876` + `#7877`, plus
+ * `#8990` / `#8991` / `#9186`).** The third family is not a message at all: one
+ * exit code — `0xC0000142` `STATUS_DLL_INIT_FAILED` — describing a child that died
+ * while the loader was initializing its native images, before its entry point,
+ * with three measured producers behind it. In `#7877` it is an MSYS2/Git-Bash
+ * program: under the restricted token bash cannot create its own signal pipe
+ * (`couldn't create signal pipe, Win32 error 5`), so it dies in the same phase,
+ * while `cmd.exe` and `pwsh` run fine under the identical mode. For `#8193` and
+ * `#8208` it is the sandbox runner's own **console**: the confined child inherits
+ * one from the runner, a restricted token may inherit a console but not create
+ * one, so a runner that owns none — a GUI-subsystem image, or a real `node.exe`
+ * spawned with `DETACHED_PROCESS` — leaves the child to ask for one of its own.
+ * `#9186` isolated the third to a single input by driving the sandbox API with the
+ * DACLs untouched: a capability SID in the token's own restricting list — added
+ * only under `workspace-write` — kills every program, `whoami.exe` and `cmd.exe`
+ * included, while the `read-only` list starts them normally. Retrying is the one
+ * thing that cannot work, and the code tells the model nothing on its own: the
+ * same value is also produced by a token built **without** the logon-SID +
+ * EVERYONE keep-alive pair, so it cannot name its own direction.
  *
  * This family is read from the **canonical value of a successful result**, which
  * is why the seam below now inspects both outcomes. The producer never marks it
@@ -148,7 +153,7 @@
  *    resolved mode, says plainly that no command can fix it, and hands the
  *    user-side preset choice over. For the native-init family it states the
  *    resolved mode, says the process never reached its entry point, enumerates
- *    the two producers measured under a confining mode with the check that
+ *    the three producers measured under a confining mode with the check that
  *    separates them (what program the reader ran; whether this host is the
  *    packaged desktop binary, which the plugin **measures and reports** rather
  *    than assumes), and carries the one conversion a model can actually make —

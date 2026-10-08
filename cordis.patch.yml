@@ -88,7 +88,7 @@
 # this environment, and it is bounded by `maxDenials`, because a plugin that can
 # stop command execution must never be the reason a session cannot finish.
 #
-# A SECOND family is recognized on the same seam (#7638, #8322): with the
+# A SECOND family is recognized on the same seam (#7638, #8322, #9170): with the
 # `minimal` preset and a confining sandbox mode, every shell call dies instantly
 # with
 #
@@ -115,7 +115,7 @@
 # running one.
 #
 # A THIRD family is recognized from a value, not from text (#7876, #7877,
-# #8193, #8208, #8313, #8336, #8334):
+# #8193, #8208, #8313, #8336, #8334, #8990, #8991, #9186):
 #
 #   [exit code: -1073741502]        (0xC0000142 STATUS_DLL_INIT_FAILED)
 #
@@ -131,7 +131,12 @@
 # process never reached its entry point, enumerates the measured producers
 # (an MSYS2 / Git-Bash program that cannot create its signal pipe under the
 # restricted token; the sandbox runner hosted by a GUI-subsystem Electron binary
-# or spawned without a console), carries the one conversion the model can make
+# or spawned without a console; and the restricted token's own restricting list,
+# where a single capability SID — added only under `workspace-write`, so the same
+# command starts fine under `read-only` — kills every program, `whoami.exe` and
+# `cmd.exe` included, and the mode switch that separates it is the one comparison
+# this status code cannot supply, because too few entries in that list land on
+# the same `0xC0000142`), carries the one conversion the model can make
 # itself (rewrite the work as PowerShell or `cmd`), names the remedy #8193
 # measured — a real node.exe host, which the desktop ships — and says plainly
 # which producers it does not know. It also states the one rule the whole family

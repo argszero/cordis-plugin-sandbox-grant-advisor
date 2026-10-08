@@ -212,10 +212,37 @@ const MUTATIONS = [
     edits: [["    'The failure belongs to the WORKSPACE, not to the command: under this mode a command that only reads',", "    'A command that only reads should still work, so start with one of those:',"]],
   },
   {
-    name: 'the advisory asserts one producer instead of enumerating the measured two',
+    name: 'the advisory asserts one producer instead of enumerating the measured three',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    'Two producers have been measured under a confining Windows mode. Check which one this is:',", "    'This was an MSYS2 program:',"]],
+    edits: [["    'Three producers have been measured under a confining Windows mode. Check which one this is:',", "    'This was an MSYS2 program:',"]],
+  },
+  {
+    // 0.16.0's addition: #9186's producer is the restricting list, and the one
+    // check a reader can run is the mode switch. An advisory that asserts the
+    // producer instead of handing over that comparison removes the only
+    // discriminator the status code does not already supply.
+    name: 'the restricting-list producer is asserted rather than handed over as a mode switch',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     CHECK: hold the command and the tool fixed and change only the MODE. If `read-only` starts the command',", "    '     This is producer 3, the restricting list, so the mode is not worth comparing any further.',"]],
+  },
+  {
+    // The same producer's honesty boundary: the code runs in BOTH directions, so
+    // a text that says the code names its own direction is a confident wrong
+    // cause for the one question the report could not answer.
+    name: 'the code is said to name its own direction, so too-few and too-many entries read alike',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one is producer 3\\'s mode',", "    'cannot tell you which mistake was made, but the status code already tells you it was too many, so producer 3\\'s mode',"]],
+  },
+  {
+    // The cause the report's own control arm retires. Leaving it in place sends
+    // pure-native programs' readers to a runtime that has nothing to do with it.
+    name: 'the .NET self-contained cause is left standing instead of retired by the control arm',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     One thing this is NOT: `.NET`. Pure-native programs die here identically, so the \"self-contained .NET',", "    '     One thing this is NOT: a missing runtime. The \"self-contained .NET runtime\" cause the reports found',"]],
   },
   {
     // 0.9.0's first addition: #8272 read the skill's name in a README while
@@ -274,7 +301,16 @@ const MUTATIONS = [
     name: 'the mount instructions drop one of the second family\'s threads',
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
-    edits: [['(#7638, #8322)', '(#8322)']],
+    edits: [['(#7638, #8322, #9170)', '(#8322, #9170)']],
+  },
+  {
+    // The third family's own new threads: 0.16.0 added three reports to the
+    // advisory and this prose has no compiler over it, so the same arm that keeps
+    // the second family honest has to cover the new ones too.
+    name: 'the mount instructions drop the third family\'s newest threads',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [['#8334, #8990, #8991, #9186):', '#8334):']],
   },
   {
     // Both of the fourth family's threads, not only the first: the family gained a
