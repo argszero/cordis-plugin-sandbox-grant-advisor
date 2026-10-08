@@ -8,15 +8,32 @@
  *
  * ## One record per family
  *
- * This plugin recognizes three unrelated environment failures — a workspace
+ * This plugin recognizes five unrelated environment failures — a workspace
  * that cannot be provisioned (`acl-provisioning`), a persistent shell that
- * cannot start (`pty-startup`), and a confined Windows child that died during
- * native initialization (`native-init`). They are different diagnoses with
+ * cannot start (`pty-startup`), a confined Windows child that died during
+ * native initialization (`native-init`), a confined command denied a path inside
+ * its own workspace (`workspace-denial`), and a sandbox whose private temp root
+ * lies inside the workspace it grants against (`temp-root-inside-workspace`).
+ * They are different diagnoses with
  * different remedies, so their bookkeeping is kept apart under one agent
  * ({@link AgentState.families}): an agent that hits both is told about both,
  * and an agent that has already been told about one is still told about the
  * other. Sharing one "already advised" flag would silently swallow the second
  * diagnosis, which is the failure mode this split exists to prevent.
+ *
+ * ## One seat outside the families
+ *
+ * The temp-root family is the one whose condition is observable **before** it
+ * fails — it is a standing fact about two directories, not an event — so that
+ * family has a second, pre-flight report of its own, tracked by
+ * {@link AgentState.standing} rather than by a family record: it exists to be
+ * delivered once *ahead* of any failure, while the family record still gets to
+ * speak if the refusal actually happens. The two are deliberately not one seat.
+ * A single flag would make the more informative report — the producer's own
+ * line, and which of its two carriers refused — unreachable in exactly the
+ * sessions that had already been warned, which is the opposite of what a
+ * prediction is for. The verdict is memoized on the first tracked call so a
+ * host that is *not* in that state pays for the lookup once and never again.
  *
  * Three counters, three meanings — keeping them apart is what stops the plugin
  * from feeding on itself:
@@ -49,6 +66,24 @@ export interface FamilyState {
   advised: boolean
 }
 
+/**
+ * Where the **standing-condition** report for one agent has got to.
+ *
+ * The temp-root family is the one whose condition exists before it fails, so its
+ * pre-flight report is not per-failure bookkeeping at all — it is a decision made
+ * once, on the first tracked call, and then never revisited:
+ *
+ * - `pending` — nothing has been decided yet; the first tracked call decides.
+ * - `clear` — decided, and this session is not in that state. Memoized rather
+ *   than re-derived so a Windows host pays for the resolution once per agent
+ *   instead of once per tool call.
+ * - `reported` — decided, the condition holds, and the report has been delivered.
+ *
+ * `clear` and `reported` are both terminal, which is what makes this a seat
+ * rather than a counter: the question is answered at most once per agent.
+ */
+export type StandingVerdict = 'pending' | 'clear' | 'reported'
+
 /** Everything the plugin remembers about one agent. */
 export interface AgentState {
   /** Per-family bookkeeping; a family appears only once it has been observed. */
@@ -61,11 +96,17 @@ export interface AgentState {
    * could not tell" read the same from the outside.
    */
   readonly withheld: boolean
+  /**
+   * Where the standing temp-root report stands for this agent. It lives here
+   * rather than in {@link AgentState.families} because the condition it reports
+   * has no failure and no producer message — see {@link StandingVerdict}.
+   */
+  readonly standing: StandingVerdict
 }
 
 /** The state of an agent this plugin has never observed. */
 export function emptyState(): AgentState {
-  return { families: {}, withheld: false }
+  return { families: {}, withheld: false, standing: 'pending' }
 }
 
 /** The record for one family, if this agent has one. */
@@ -84,6 +125,7 @@ function withFamily(state: AgentState | undefined, family: FailureFamily, record
   return {
     families: { ...state?.families, [family]: record },
     withheld: state?.withheld ?? false,
+    standing: state?.standing ?? 'pending',
   }
 }
 
@@ -184,6 +226,36 @@ export function recordWithheld(state: AgentState | undefined): AgentState {
   return {
     families: { ...state?.families },
     withheld: true,
+    standing: state?.standing ?? 'pending',
+  }
+}
+
+/**
+ * Where the standing temp-root report stands for one agent.
+ * @param state - the agent's current state, or undefined before first sight.
+ * @returns the verdict; `pending` for an agent this plugin has not seen.
+ */
+export function standingOf(state: AgentState | undefined): StandingVerdict {
+  return state?.standing ?? 'pending'
+}
+
+/**
+ * Record the verdict of the standing check, leaving every other field alone.
+ *
+ * Called once per agent, whichever way the check comes out: `clear` memoizes
+ * the decision so a host outside the condition never repeats the resolution, and
+ * `reported` marks the one delivery. `pending` is not accepted — it is the state
+ * before a decision, and writing it here would let a decided agent be asked
+ * again, which is the whole thing this seat prevents.
+ * @param state - the agent's current state, or undefined on first sight.
+ * @param verdict - the decided verdict.
+ * @returns the updated state.
+ */
+export function recordStanding(state: AgentState | undefined, verdict: Exclude<StandingVerdict, 'pending'>): AgentState {
+  return {
+    families: { ...state?.families },
+    withheld: state?.withheld ?? false,
+    standing: verdict,
   }
 }
 

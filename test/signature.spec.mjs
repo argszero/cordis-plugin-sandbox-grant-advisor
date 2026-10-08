@@ -19,17 +19,20 @@ import {
   NATIVE_INIT_DISCUSSIONS,
   PREREQUISITE,
   PTY_DISCUSSIONS,
+  TEMP_ROOT_DISCUSSIONS,
   WORKSPACE_DENIAL_DISCUSSIONS,
 } from '../lib/advice.js'
 import {
   classifyNativeInitDeath,
   classifyProvisioningFailure,
   classifyPtyStartupFailure,
+  classifyTempRootRefusal,
   classifyWorkspaceDenial,
   failureLine,
   hasWorkspaceDenialStamp,
   isInsideWorkspace,
   STATUS_DLL_INIT_FAILED,
+  TEMP_ROOT_ASSERTION,
   windowsPathsIn,
 } from '../lib/signature.js'
 import {
@@ -44,6 +47,9 @@ import {
 
 /** The exact text reported in #7538 / #7622 / #7646. */
 const REPORTED = 'SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'
+
+/** The refusal the temp-root producers throw, as `path-boundary.ts` formats it (#9175). */
+const TEMP_REFUSAL = `${TEMP_ROOT_ASSERTION}: workspace=C:\\Users\\u; temp=C:\\Users\\u\\AppData\\Local\\Temp`
 
 test('the reported signature is recognized, with every producer field kept', () => {
   const failure = classifyProvisioningFailure(REPORTED)
@@ -1122,7 +1128,42 @@ test('the fourth family names itself, and borrows none of the other three storie
   }
 })
 
-test('the four families share no message: each producer\'s input reaches exactly one classifier', () => {
+test('the fifth family names itself, and borrows none of the other four stories', () => {
+  const failure = classifyTempRootRefusal(TEMP_REFUSAL)
+  assert.ok(failure)
+  const text = advisoryText(failure, { tool: 'bash' })
+  assert.notEqual(text, advisoryText(classifyProvisioningFailure(REPORTED)))
+  assert.notEqual(text, advisoryText(classifyPtyStartupFailure(PTY_EXIT), { mode: 'read-only' }))
+  assert.notEqual(text, advisoryText(classifyNativeInitDeath(foreground(NATIVE_DEATH)), { mode: 'read-only' }))
+  const denial = classifyWorkspaceDenial(
+    denied(),
+    { command: `type ${INSIDE}` },
+    { platform: 'win32', workspaceRoot: WORKSPACE_ROOT },
+  )
+  assert.notEqual(text, advisoryText(denial, { tool: 'bash' }))
+  // The ACL family's remedy belongs to the other end of this backend and must not
+  // leak into this one: this refusal precedes any process, so a grant line would be
+  // advice for a problem the reader does not have.
+  assert.doesNotMatch(text, /\(Get-Acl/)
+  assert.doesNotMatch(text, /icacls .*\/grant/)
+  assert.doesNotMatch(text, /If you own it/)
+  // The workspace-denial family's discriminator is about tokens and DACLs; this
+  // one is about two directory paths and nothing else.
+  assert.doesNotMatch(text, /two-sided discriminator/)
+  // An href replaces the thread line, exactly as in the other families.
+  const linked = advisoryText(failure, { tool: 'bash', href: 'https://example.invalid/d/9175' })
+  assert.match(linked, /tracked upstream: https:\/\/example\.invalid\/d\/9175/)
+  assert.doesNotMatch(linked, /tracked upstream \(discussion/)
+  // And the family's own thread is the one it cites. Unlike the fourth family, this
+  // family's thread id appears ONLY in the thread line — nothing else in its text
+  // cites #9175 — so an href legitimately replaces the id along with the line, and
+  // that is asserted rather than a retention that would be false here.
+  assert.match(text, new RegExp(TEMP_ROOT_DISCUSSIONS))
+  assert.match(linked, /https:\/\/example\.invalid\/d\/9175/)
+  assert.ok(!linked.includes(`discussion ${TEMP_ROOT_DISCUSSIONS}`))
+})
+
+test('the five families share no message: each producer\'s input reaches exactly one classifier', () => {
   const facts = { platform: 'win32', workspaceRoot: WORKSPACE_ROOT }
   const stamped = denied()
   assert.equal(classifyProvisioningFailure(PTY_EXIT), undefined)
@@ -1133,6 +1174,17 @@ test('the four families share no message: each producer\'s input reaches exactly
   assert.equal(classifyNativeInitDeath(stamped, { command: `type ${INSIDE}` }), undefined)
   assert.equal(classifyProvisioningFailure('[exit code: -1073741502]'), undefined)
   assert.equal(classifyPtyStartupFailure('[exit code: -1073741502]'), undefined)
+  // The two text-read families that share the error channel do not overlap: the
+  // PTY signature is a bare sentence with no operands, and the temp-root one
+  // requires them, so neither producer's message classifies as the other.
+  assert.equal(classifyPtyStartupFailure(TEMP_REFUSAL), undefined)
+  assert.equal(classifyTempRootRefusal(PTY_EXIT), undefined)
+  // The temp-root sentence names paths inside a workspace, which is exactly what
+  // the workspace-denial family keys on — so this is the pair most likely to be
+  // conflated. It is not: that family reads the executor's stamp, never a
+  // sentence, so a refusal value with no stamp is not its business.
+  assert.equal(classifyWorkspaceDenial(foreground(0), { command: `type ${INSIDE}` }, facts), undefined)
+  assert.equal(classifyTempRootRefusal('[exit code: 1] sandbox: { denied: true }'), undefined)
   // The two value families are distinguished by the loader status alone: a denial
   // value carries no such code, and a loader death carries no stamp.
   assert.equal(classifyWorkspaceDenial(foreground(NATIVE_DEATH), { command: `type ${INSIDE}` }, facts), undefined)

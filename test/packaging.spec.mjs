@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
-import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
+import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
@@ -191,12 +191,12 @@ test('the shipped bundle patch describes the family the advice module covers, an
   for (const id of tracked) {
     assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
   }
-  // All four families, not only the first: the patch documents what the plugin
+  // All five families, not only the first: the patch documents what the plugin
   // recognizes, and a family whose threads are missing from it is a family the
   // mount instructions do not admit exists. The last release that added threads
   // to the second and third families left this file behind for exactly that
   // reason — only the first list was wired to an assertion.
-  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS]]) {
+  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS], ['the temp-root family', TEMP_ROOT_DISCUSSIONS]]) {
     for (const id of discussions.match(/#\d+/g) ?? []) {
       assert.ok(patch.includes(id), `the bundle patch never names ${id} (${name}), which the advisories cover`)
     }
@@ -209,6 +209,13 @@ test('the shipped bundle patch describes the family the advice module covers, an
   // smaller family than the plugin covers, and drops the one recovery it has.
   assert.ok(/THE ROOT ITSELF REFUSED/.test(patch), 'the bundle patch does not describe the fourth family\'s third branch')
   assert.ok(/restart the desktop/i.test(patch), 'the bundle patch never names the recovery the third branch has')
+  // The fifth family's whole remedy is one environment change, and its two
+  // producers are the fact a maintainer needs: a mount instruction that describes
+  // the refusal without either would leave the reader with a diagnosis and no way
+  // to act on it — which is exactly the shape #9175 reported.
+  assert.ok(/%TMP%/.test(patch), 'the bundle patch never names the environment lever the temp-root remedy turns on')
+  assert.ok(/GetTempPathW/.test(patch), 'the bundle patch does not say why `%TMP%` is the lever')
+  assert.ok(/two producers/i.test(patch), 'the bundle patch does not state that one sentence has two producers, which a fix must satisfy')
   // And the first family's independent confirmation, which is the difference
   // between a reading of the source and a measurement of it.
   assert.ok(/confirmed from outside/.test(patch), 'the bundle patch does not carry the independent confirmation of the missing right')

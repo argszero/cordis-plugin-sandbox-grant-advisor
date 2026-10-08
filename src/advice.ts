@@ -3,7 +3,7 @@
  * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test, one family at a time. The four families are shaped by the same
+ * by a test, one family at a time. The five families are shaped by the same
  * question — is this the sandbox's doing, and what can the reader do about it —
  * and they answer it differently:
  *
@@ -142,6 +142,30 @@
  *   on **breadth** — the one fact the reader already owns — before it hands over
  *   any check, and separates them from outside by the repository's own
  *   `diagnose-windows-sandbox-acl` and its `LOW_LABEL` report.
+ * - **The private temp root inside the workspace** (`temp-root-inside-workspace`,
+ *   #9175) is the fifth, and it is the one whose failure is not a failure of
+ *   anything the session asked for: the sandbox refuses to **start** a command —
+ *   `echo test` included, with no subprocess output at all — because the temp ROOT
+ *   it would create its private, revocable temp capability under lies inside the
+ *   workspace it grants the standing capability to. Its remedy is asymmetric with
+ *   every earlier family in one way that decides the whole text: **nothing inside
+ *   the session can carry it out**. The ACL remedy is a command the user runs while
+ *   the session continues; here there is no session to run a command in. So the fix
+ *   is an environment fact on the process that *launches* the harness (`%TMP%` /
+ *   `%TEMP%`, which `GetTempPathW` reads in that order) or a different workspace,
+ *   and the text says so rather than offering a line the model cannot execute.
+ *   It is also the family that carries **two producers of one sentence** — the
+ *   session-scoped provider while it assembles the runner argv (no child ever
+ *   existed) and the runner itself before it spawns (stderr behind
+ *   `windows-acl-run: `, exit 127, reclassified by the seam as a runner failure)
+ *   — which the advisory names, because a change to the rule has to satisfy both.
+ *   And it is the only family whose text is delivered **twice by design**: once as
+ *   a pre-flight report of the standing condition, before anything has failed, and
+ *   once beside the refusal itself if it does happen. The pre-flight half is the
+ *   only place in this module that *predicts* rather than reads, so it is written
+ *   to be falsifiable — it prints the three facts it computed (host, mode, both
+ *   paths) and says that a command which runs anyway is evidence the prediction did
+ *   not apply. Nothing is granted, escalated or moved by this plugin in either half.
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -164,12 +188,16 @@
  * says which one a check on the ACE alone would miss — and it is the one family
  * with a **second cut before the check**: which half is missing is settled by how
  * MUCH of the tree is affected, because a reader who repairs the DACL of a
- * label-starved workspace has spent a privilege for nothing.
+ * label-starved workspace has spent a privilege for nothing. The temp-root family
+ * is the only one whose discriminator the *plugin* supplies rather than the reader
+ * finding: it prints both operands it computed, and — since no command can be run
+ * in the session to check anything — it states that a command which runs anyway
+ * falsifies the report, which is the one verification available without a shell.
  *
  * @module
  */
 
-import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, WorkspaceDenialFailure, RecognizedFailure } from './signature.js'
+import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, TempRootFailure, WorkspaceDenialFailure, RecognizedFailure } from './signature.js'
 import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
@@ -230,6 +258,16 @@ export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / 
 export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383 / #8421 / #8409'
 
 /**
+ * The upstream thread the temp-root advisory is a stopgap for.
+ *
+ * One report, because the shape is one sentence out of one invariant: `#9175`
+ * has the failure, the platform, and — this is what makes it usable without a
+ * Windows host — the two paths the assertion printed, which is exactly the pair
+ * the pre-flight half has to reproduce to be worth anything.
+ */
+export const TEMP_ROOT_DISCUSSIONS = '#9175'
+
+/**
  * The thread list each family's withholding note cites.
  *
  * A withheld recognition is a decision the host log has to account for, and the
@@ -245,6 +283,7 @@ export const DISCUSSIONS_OF: Record<FailureFamily, string> = {
   'pty-startup': PTY_DISCUSSIONS,
   'native-init': NATIVE_INIT_DISCUSSIONS,
   'workspace-denial': WORKSPACE_DENIAL_DISCUSSIONS,
+  'temp-root-inside-workspace': TEMP_ROOT_DISCUSSIONS,
 }
 
 /** The documented prerequisite, quoted from the backend's README. */
@@ -627,6 +666,7 @@ export function advisoryText(failure: RecognizedFailure, context: AdvisoryContex
     return nativeInitAdvisory(failure, context.mode, context.electronHost ?? electronHost(), context.href)
   }
   if (failure.family === 'workspace-denial') return workspaceDenialAdvisory(failure, context.tool, context.href)
+  if (failure.family === 'temp-root-inside-workspace') return tempRootAdvisory(failure, context.tool, context.href)
   return aclAdvisory(failure, context.href)
 }
 
@@ -1130,6 +1170,217 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     'working as designed, and a confident wrong cause is worse than no answer.',
     'What it is NOT: this plugin does not edit an ACL, does not elevate, and does not offer `danger-full-access` as a',
     'fix.',
+  ].join('\n')
+}
+
+/**
+ * Why the temp-root invariant exists, and what makes it a pre-spawn refusal.
+ *
+ * Shared by both halves of the family — the failure advisory and the standing
+ * (pre-flight) one — because it is a fact about the backend rather than about
+ * the call that hit it, and because the two texts must not drift apart: a reader
+ * told "your commands cannot start" in the pre-flight and something subtler here
+ * would have to reconcile the two themselves.
+ *
+ * Everything is read off the shipped source: the assertion and its reason
+ * (`sandbox-windows-acl/src/path-boundary.ts`: "every child created below it
+ * would inherit the standing workspace capability"), the canonical comparison
+ * (`realpathSync.native` on both operands, then `relative`), and the fact that
+ * the refusal precedes any process (`sandbox-local/src/index.ts`, whose grant
+ * is materialized while the runner argv is assembled). Stating that last part is
+ * what stops the reader reaching for a permission fix: nothing was denied, so
+ * there is nothing to grant.
+ * @returns the section's lines.
+ */
+function tempRootMechanism(): string[] {
+  return [
+    'Why the rule exists — it is a capability-disjointness invariant, not a verdict on your workspace:',
+    '  A `workspace-write` session is given two capabilities that must not contain one another: a STANDING',
+    '  write grant on the workspace ROOT, and a REVOCABLE private temp capability under a random child',
+    '  directory created beneath the temp root. The check is `assertTempRootOutsideWorkspace(workspaceRoot,',
+    '  tempRoot)`, and its own comment states the reason: "every child created below it would inherit the',
+    '  standing workspace capability" (`packages/sandbox/sandbox-windows-acl/src/path-boundary.ts`). A temp',
+    '  root under the workspace root puts the revocable half inside the standing one, where it stops being',
+    '  revocable — so the backend refuses instead of materializing it.',
+    '  It compares the two directories CANONICALLY (`realpathSync.native` on both, then `path.relative`), so',
+    '  containment is a filesystem fact rather than a spelling: `AppData\\Local\\Temp` under a workspace of',
+    '  `C:\\Users\\<you>` is a violation however either path happens to be written.',
+    '  This is not an ACL problem and no `icacls` grant fixes it: the refusal happens while the sandbox is',
+    '  deciding whether it can set up its own capabilities, before any process is created.',
+  ]
+}
+
+/**
+ * The two environment changes that actually move the temp root.
+ *
+ * This section is the family's whole value, and it is written for the *user*
+ * because nothing in the session can carry it out — the failure it explains took
+ * command execution away. Both levers are facts about `os.tmpdir()`
+ * (`GetTempPathW` reads `%TMP%`, then `%TEMP%`, then `%USERPROFILE%`) and about
+ * which directory the session was opened on, and neither touches the workspace:
+ * the two directories stop overlapping, which is the whole of what the invariant
+ * asks for. Deliberately **not** a grant command — see {@link tempRootMechanism}
+ * — and deliberately not `danger-full-access`, which is refused in
+ * {@link tempRootBoundaries}.
+ * @returns the section's lines.
+ */
+function tempRootFix(): string[] {
+  return [
+    'What actually moves the temp root — two ways, and the first is the least invasive:',
+    '  1. Point the harness\'s temp directory outside the workspace BEFORE it starts. `os.tmpdir()` on',
+    '     Windows is `GetTempPathW`, which reads `%TMP%` first, then `%TEMP%`, then `%USERPROFILE%` — so',
+    '     setting `%TMP%` is enough. Create the directory first (the check resolves both paths, so it has to',
+    '     exist), and set the variable in the process that LAUNCHES the harness:',
+    '       cmd:         set TMP=C:\\dsh-temp        (then start the harness from that same prompt)',
+    '       PowerShell:  $env:TMP = \'C:\\dsh-temp\'; <start the harness>',
+    '     A variable set inside this session cannot help: setting one needs a shell, and that is the thing',
+    '     that cannot start.',
+    '  2. Or open the session on a workspace that is not an ancestor of the temp root — `C:\\work\\project`',
+    '     rather than `C:\\Users\\<you>`. Where the workspace IS the profile directory or a drive root, the',
+    '     first option is the only one left.',
+    'Either way the change is in the environment rather than in the workspace: nothing is repaired and no',
+    'ACL is touched — the two directories simply stop overlapping.',
+  ]
+}
+
+/**
+ * What the family's refusal does *not* implicate, so a reader does not reach for
+ * it.
+ *
+ * Three mistakes are available and all three were reachable from the reports.
+ * The first two are other modes: `read-only` never materializes a private temp
+ * capability (and the runner leaves the ambient temp entries untouched there),
+ * and `danger-full-access` does not spawn through the sandbox at all — so
+ * neither ever consults the rule, and passing under the second is consistency
+ * rather than a workaround. The third is the session's own reach: the file tools
+ * do not spawn this runner, so they keep working, which is exactly why no
+ * experiment inside the session can repair the environment.
+ * @returns the section's lines.
+ */
+function tempRootBoundaries(): string[] {
+  return [
+    'Three things this does not change, so a reader does not reach for them:',
+    '  - A `read-only` session is unaffected. No private temp capability is materialized in that mode, so the',
+    '    assertion is never reached — the runner passes the ambient temp root straight through.',
+    '  - `danger-full-access` does not hit it either, and that is consistency rather than a workaround: that',
+    '    mode never spawns through the sandbox, so the rule is never consulted. Switching to it would not',
+    '    move the temp root; it would remove the confinement the rule exists to protect.',
+    '  - Your file read/write tools keep working, because they never spawn the sandbox runner. Only command',
+    '    execution is gone — which is also why no experiment inside this session can repair it.',
+  ]
+}
+
+/**
+ * Build the advisory for a refusal whose cause is the temp root's position.
+ *
+ * Two things this text must do beyond the shared sections. It must name **which
+ * of the two producers refused**, because the sentence has two of them, they fire
+ * at different moments, and a fix has to satisfy both — the provider refuses
+ * while the runner argv is being assembled (no child ever existed, which is why
+ * the call shows no output at all), and the runner refuses again for
+ * `workspace-write` before it spawns (stderr behind `windows-acl-run: `, exit
+ * 127, reclassified by the seam into a `SandboxUnavailableError`). And it must
+ * print **both operands the producer itself printed** rather than re-deriving
+ * them, because the family's claim is a statement about that pair of paths.
+ * @param failure - the recognized failure.
+ * @param tool - the tool whose call was refused, when the caller knows it.
+ * @param href - optional URL shown for the upstream thread.
+ * @returns the user-role notice text.
+ */
+function tempRootAdvisory(failure: TempRootFailure, tool?: string, href?: string): string {
+  const where = href === undefined
+    ? `tracked upstream (discussion ${TEMP_ROOT_DISCUSSIONS})`
+    : `tracked upstream: ${href}`
+  const call = tool === undefined ? 'This command' : `The \`${tool}\` command`
+  return [
+    'Sandbox command execution is unavailable — the sandbox\'s private temp root lies inside this session\'s',
+    'workspace, and it refuses to start any command until the two are disjoint.',
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}`,
+    `${call} runs under sandbox mode \`workspace-write\`, the only mode this rule applies to, and the producer`,
+    'named the two directories it compared:',
+    `  workspace root: ${failure.workspaceRoot}`,
+    `  temp root:      ${failure.tempRoot}`,
+    'Those two values are the producer\'s own, quoted rather than recovered here, so they are the pair the',
+    'executor actually tested.',
+    '',
+    'One sentence, two producers, and any fix has to satisfy both — the session-scoped provider asserts it while',
+    'it assembles the sandbox runner\'s argv, and the runner asserts the same pair again for `workspace-write`',
+    'before it spawns the confined child. Which one this was:',
+    ...(failure.carrier === 'pre-spawn'
+      ? [
+          '  - the PROVIDER, before any child existed — which is why this call reports no subprocess output at',
+          '    all: nothing ran.',
+        ]
+      : [
+          '  - the RUNNER, whose line is written to stderr behind the `windows-acl-run: ` marker with exit 127',
+          '    — the signature the seam reads as a runner failure — and therefore reaches the session as the',
+          '    `Runner failure: ` detail of a `SandboxUnavailableError` rather than as a library assertion.',
+        ]),
+    '',
+    ...tempRootMechanism(),
+    '',
+    ...tempRootFix(),
+    '',
+    ...tempRootBoundaries(),
+    '',
+    'Do NOT retry and do not look for a command that fixes it: every attempt fails identically, and there is no',
+    'shell to run a remedy in. Use your file tools, and hand the environment change above to the user.',
+    '',
+    'How to read this: the assertion names neither the operand a user can move nor the lever that moves it, so',
+    'the diagnosis is delivered here instead. This is a stopgap, ' + where + '. What it is NOT: this plugin',
+    'changes no environment, moves no directory and widens no sandbox — the change above is the user\'s.',
+  ].join('\n')
+}
+
+/**
+ * Build the pre-flight report of the standing temp-root condition.
+ *
+ * This is the one place in this module that **predicts** where every other reads
+ * what a producer wrote, and the text is shaped by that difference. It prints the
+ * facts it computed — host, mode, and both directories — so the reader can audit
+ * the claim, and it says plainly how the claim is falsified (a command that runs
+ * at all is evidence this composition is not the one the rule governs), because
+ * the session has no shell in which to test it. That is also why it is a
+ * *separate* report rather than a substitute for the failure advisory: if the
+ * refusal does happen, the producer's own line and the carrier it came from are
+ * facts this half cannot have, and they follow.
+ * @param workspaceRoot - the root the policy resolver reported for this session.
+ * @param tempRoot - the temp root the executor would use (`os.tmpdir()`).
+ * @param href - optional URL shown for the upstream thread.
+ * @returns the user-role notice text.
+ */
+export function tempRootPreflightAdvisory(workspaceRoot: string, tempRoot: string, href?: string): string {
+  const where = href === undefined
+    ? `tracked upstream (discussion ${TEMP_ROOT_DISCUSSIONS})`
+    : `tracked upstream: ${href}`
+  return [
+    'Standing condition, before anything has failed: this session\'s sandbox has its private temp root inside',
+    'the workspace it grants against. Three facts put it there:',
+    '  host        win32 — the ACL runner is the only backend with this rule',
+    '  mode        workspace-write — the only mode that materializes a private temp capability',
+    `  workspace   ${workspaceRoot}`,
+    `  temp root   ${tempRoot}`,
+    'and the last two overlap: the temp root is that directory or a directory beneath it. Under this mode the',
+    'harness refuses to start ANY process whose private temp root lies inside the workspace — not only a command',
+    'that writes there, every command, `echo test` included, with no subprocess output at all. File read/write',
+    'tools are unaffected: they never spawn that runner.',
+    '',
+    'How to read this, given that no command can be run here to check it: the two paths above are this plugin\'s',
+    'own resolution of the pair the backend compares, and the rule is the backend\'s own',
+    '(`assertTempRootOutsideWorkspace`, applied to `realpathSync.native` of both). That also makes the report',
+    'falsifiable in one step — if a command does run in this session, this condition does not apply to your',
+    'composition and this message can be ignored.',
+    '',
+    ...tempRootMechanism(),
+    '',
+    ...tempRootFix(),
+    '',
+    ...tempRootBoundaries(),
+    '',
+    'This warning is not a substitute for the refusal\'s own report: if a command is refused, a second advisory',
+    'carries the producer\'s line and names which of the two carriers refused. This is a stopgap, ' + where + '.',
   ].join('\n')
 }
 

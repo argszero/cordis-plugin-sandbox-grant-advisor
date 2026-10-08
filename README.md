@@ -1,7 +1,7 @@
 # @argszero/cordis-plugin-sandbox-grant-advisor
 
 Turns a sandbox environment failure that has **no path forward** into a
-diagnosis the model — and the user reading the transcript — can act on. Four
+diagnosis the model — and the user reading the transcript — can act on. Five
 signatures, one mechanism:
 
 ```
@@ -10,6 +10,7 @@ PTY shell exited during startup                             # persistent shell �
 [exit code: -1073741502]  (0xC0000142)                      # a confined child that never started
 [exit code: 1]  sandbox: { mode: "workspace-write", denied: true }
                                                             # denied INSIDE the workspace
+Windows ACL temp root must be outside the workspace: …      # the private temp root is inside the workspace
 ```
 
 **This plugin is the stopgap for "the error does not name the outstanding
@@ -17,7 +18,7 @@ condition".** It repairs nothing: no ACL is written, no privilege is requested,
 nothing is elevated, no environment variable is set for another process, no
 preset is installed and no mode is changed.
 
-## The four failures it recognizes
+## The five failures it recognizes
 
 The first two are recognized on the public **`tools/post-execute`** waterfall
 (`@deepseek-ai/dsh-tools`) from the failure text. That seam is the one that has
@@ -28,7 +29,9 @@ channel that speaks to the model in the same step (`PostToolDecision`'s
 `additionalContexts`, which the agent loop turns into a durable user-role message
 — `packages/core/agent-loop/src/tool-calls.ts`). The third and fourth are
 recognized at the **same seam** from the canonical value of a result the pipeline
-calls a *success*, for reasons §3 and §4 give in full.
+calls a *success*, for reasons §3 and §4 give in full. The fifth is read from a
+thrown error's own message like the second, and is the one family the plugin also
+reports **before** anything fails, for reasons §5 gives in full.
 
 That seam, not `ctx.sandbox.confine`: `confine(argv, policy, signal)` sees the
 confinement failure too, but its signature carries no agent, so a wrapper could
@@ -825,6 +828,93 @@ indistinguishable from "this plugin could not tell".
 [#423] is a Discussion (the repository has issues disabled), and the reply
 covering this family is posted there.
 
+### 5. The private temp root inside the workspace (`temp-root-inside-workspace`, added in 0.15.0)
+
+[Discussion #9175] reports the one Windows state in which the sandbox cannot start
+**any** process at all: a session opened on a workspace that *contains* the
+system temp directory. On Windows the per-user temp root is
+`C:\Users\<you>\AppData\Local\Temp`, so a session whose workspace is the profile
+directory — or any ancestor of it — is in that state, and under `workspace-write`
+every command fails, `echo test` included, with no subprocess output and an error
+that names neither operand to move nor the lever that moves it. The file tools
+keep working, because they never spawn the sandbox runner; only command execution
+is gone.
+
+The invariant is `assertTempRootOutsideWorkspace(workspaceRoot, tempRoot)`
+(`packages/sandbox/sandbox-windows-acl/src/path-boundary.ts`), and its own comment
+gives the reason: a `workspace-write` session is handed two capabilities that must
+not contain one another — a **standing** write grant on the workspace root and a
+**revocable** private temp capability under a random directory created beneath the
+temp root — and "every child created below it would inherit the standing workspace
+capability", which would make the revocable half permanent. So the backend refuses
+instead of materializing it. The two directories are compared **canonically**
+(`realpathSync.native` on both, then `path.relative`), which is why this is a
+filesystem fact rather than a spelling.
+
+**One sentence, two producers.** The same assertion is thrown twice on the way in,
+and a fix has to satisfy both:
+
+- the **session-scoped provider** (`sandbox-local`), while it assembles the runner
+  argv and before any child exists — which is why the call reports no subprocess
+  output at all;
+- the **runner** (`sandbox-windows-acl`), which asserts the same pair again for
+  `workspace-write` before it spawns, writing its line to stderr behind the
+  `windows-acl-run: ` marker with exit 127 — the signature the seam reads as a
+  runner failure, so *that* copy reaches the session as the `Runner failure: `
+  detail of a `SandboxUnavailableError` rather than as a library assertion.
+
+The family recognizes both spellings and **names which carrier refused**, because
+the two fire at different moments and only one of them has anything on stderr.
+
+**It is read from the error, never from text that merely mentions it.** The
+signature is the assertion's own sentence *with its two operands*, and it is read
+from `error.message` alone — not from a result's rendered content. A command whose
+own output quotes the sentence is an ordinary successful run and is left alone
+(this suite pins that arm), which is the same discipline §2's whole-line PTY match
+follows.
+
+**Why it ships no repair command.** There is nothing to repair: the refusal
+happens while the sandbox is deciding whether it can set up its own capabilities,
+before any process is created, and no `icacls` grant, no elevation and no
+ownership change affects it. What moves the condition is the environment — the
+temp root or the workspace — and it is the *user's* move, because the failure it
+explains took command execution away and there is no shell left in the session to
+run a remedy in:
+
+1. Point the harness's temp directory outside the workspace before it starts.
+   `os.tmpdir()` on Windows is `GetTempPathW`, which reads `%TMP%`, then `%TEMP%`,
+   then `%USERPROFILE%` — so `set TMP=C:\dsh-temp` (with the directory created
+   first, since the check resolves both paths) in the process that launches the
+   harness is enough.
+2. Or open the session on a workspace that is not an ancestor of the temp root —
+   `C:\work\project` rather than `C:\Users\<you>`.
+
+`read-only` is deliberately unaffected (no private temp capability is
+materialized, so the assertion is never reached), and `danger-full-access` never
+spawns through the sandbox at all — passing under it is consistency, not a
+workaround. The advisory says so, because both are the next ideas the diagnosis
+invites.
+
+**The pre-flight half.** This is the plugin's only *prediction*, and the family's
+second seat: on Windows, before the first tracked call, it asks the public
+`ctx.sandboxPolicy.resolve({ session })` for the session's mode and workspace root
+and compares the root against `os.tmpdir()` with the backend's own canonical
+computation. A `workspace-write` session in the condition is told **before** its
+first command fails — the model gets the environment change without first spending
+a turn on an `echo` that cannot run. The two seats are separate on purpose: the
+pre-flight reports the standing condition, and if a refusal does happen, the
+producer's own line and the carrier that wrote it are facts only the failure half
+can have, so a second advisory follows. The pre-flight prints the three facts it
+computed (host, mode, both directories) so the claim can be audited, and states the
+one verification available when no command can be run — *if a command does run in
+this session, this condition does not apply and the message can be ignored*. A
+Windows host that cannot answer at all (no policy service, no session, a resolver
+that throws) is disclosed once on the host log rather than passed off as clear,
+which is the disclosure rule every other family keeps.
+
+[#9175] is a Discussion (the repository has issues disabled), and the reply
+covering this family is posted there.
+
 ## What it does with a recognized failure
 
 1. **One durable advisory per agent, per family.** An agent that hits two
@@ -960,10 +1050,12 @@ than one that stays silent.
 
 - **The Windows path itself cannot be witnessed on macOS**, where this plugin
   was built. What the test suite proves is the decision layer — classification
-  of all four families (the third from the producer's own canonical value,
+  of all five families (the third from the producer's own canonical value,
   built by the suite with the reported `-1073741502` and the report's stderr
   line; the fourth from the executors' own stamp, built by the suite with the
-  mode, the `denied` flag and the refusal dialect the executor matches), the
+  mode, the `denied` flag and the refusal dialect the executor matches; the fifth
+  from the producer's own sentence with both operands, in both carrier spellings,
+  plus the pre-flight containment computed on real directories), the
   once-per-agent-per-family rule, the sandbox-mode gate
   and its fail-closed behaviour, the fail-fast budget and its self-feeding
   guard, and the wiring to a real cordis `Context` and the real `ToolRuntime` —
@@ -979,6 +1071,10 @@ than one that stays silent.
   platform fact, which the suite supplies by stubbing `process.platform` for the
   arms that need `win32` and restoring it — the plugin reads the real fact rather
   than a config knob, because a knob would be a backdoor into a shipped decision.
+  The temp-root family needs the same stub for its pre-flight half, and its
+  containment claim is exercised on **real** directories (a real ancestor of this
+  host's `os.tmpdir()`), so the `realpathSync.native` comparison the backend
+  performs is really performed here rather than simulated on strings.
   What that proves is the decision layer against the producers' stamped values;
   the ACE-inheritance path itself is still unwitnessed here, and the advisory
   says as much by shipping no repair command.
@@ -1012,7 +1108,7 @@ than one that stays silent.
   outside the seam this plugin subscribes to. The report and its proposed fix
   stay with the maintainers; all this plugin can do is explain the provisioning
   failure that shares its root.
-- **The real fix is upstream, in all four families.** For the ACL failure,
+- **The real fix is upstream, in all five families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
   a 52-minute detour into one line belongs at that site. For the PTY failure,
@@ -1025,8 +1121,13 @@ than one that stays silent.
   `grantWrite`: its early return asks only whether the **root** already carries
   the ACE, so the descendants that missed the propagation are never repaired —
   the check would have to look past the root, or the denial surface would have to
-  say *which* path was refused instead of only that one was. This plugin is the
-  stopgap for all four.
+  say *which* path was refused instead of only that one was. For the temp-root
+  refusal the assertion is already exact and pre-spawn, so the upstream repair is
+  not a better message but a *reachable* one: the provider and the runner both
+  throw an internal assertion a session can neither read nor act on, and the two
+  ways out — a warning at session start, or a refusal that names the environment
+  lever — belong where the assertion is raised rather than in a plugin that has to
+  guess the same pair back. This plugin is the stopgap for all five.
 
 ## Compatibility
 
@@ -1147,3 +1248,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8412]: https://github.com/deepseek-ai/deepseek-harness/discussions/8412
 [#8421]: https://github.com/deepseek-ai/deepseek-harness/discussions/8421
 [#8426]: https://github.com/deepseek-ai/deepseek-harness/discussions/8426
+[#9175]: https://github.com/deepseek-ai/deepseek-harness/discussions/9175

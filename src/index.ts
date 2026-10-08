@@ -2,7 +2,7 @@
  * `sandbox-grant-advisor`: turn an environment failure that has no path forward
  * into a diagnosis the model — and the user reading the transcript — can act on.
  *
- * ## The four failures it recognizes
+ * ## The five failures it recognizes
  *
  * **Workspace provisioning (Windows ACL).** Four reports of one signature
  * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
@@ -88,6 +88,32 @@
  * why a denial is the *designed* outcome in three other situations (outside the
  * workspace, under `read-only`, a runner failure) and must never be advised.
  *
+ * **The private temp root inside the workspace (`temp-root-inside-workspace`,
+ * `#9175`).** The fifth family is the only one that takes **every** command with
+ * it — `echo test` included, with no subprocess output at all, while the file
+ * tools keep working — and it is not a failure of anything the session asked for:
+ * `workspace-write` materializes a private, revocable temp capability under a
+ * random child of `os.tmpdir()`, and the backend refuses to do so when that temp
+ * root lies inside the workspace carrying the standing grant. The refusal is the
+ * backend's own capability-disjointness assertion
+ * (`sandbox-windows-acl/src/path-boundary.ts`), thrown by **two producers** that
+ * this plugin distinguishes: the session-scoped provider, while it assembles the
+ * runner argv (no child ever existed, which is why the call shows no output), and
+ * the windows-acl runner, before it spawns (stderr behind `windows-acl-run: `,
+ * exit 127, reclassified by the seam into a `SandboxUnavailableError`). Both are
+ * read from `result.error.message`, since both *throw* — a command that prints
+ * the sentence finishes as a run and cannot reach this family.
+ *
+ * This family is also the only one that is diagnosed **twice, by design**. A
+ * session in that state has no shell left, so discovering the condition from the
+ * first failed command is already late; the plugin therefore reports it
+ * *pre-flight*, once per agent, on the first tracked call — before anything has
+ * failed — and again beside the refusal itself if it happens. The pre-flight half
+ * is the only prediction in this plugin, so it states the three facts it computed
+ * (host, mode, both directories) and the one step that falsifies it. See
+ * `src/temp-root.ts` for why that computation is a re-implementation of the
+ * backend's rule rather than an import.
+ *
  * ## Where it acts, and why there
  *
  * One listener on the public `tools/post-execute` waterfall
@@ -133,7 +159,13 @@
  *    object), gives the two-sided reachability rule, names the label variant of
  *    the same shape, and prints **no** repair command — the obvious one is
  *    refused by Windows with `ERROR_NONE_MAPPED (1332)`, and this project has no
- *    Windows host to verify a line on. All four ride `additionalContexts`, so the
+ *    Windows host to verify a line on. For the temp-root family it is the family
+ *    whose remedy **nothing inside the session can carry out** — the refusal took
+ *    command execution away — so it quotes both directories the producer printed,
+ *    names which of the two carriers refused, and hands the environment change
+ *    (`%TMP%` / `%TEMP%`, or a workspace that does not contain the temp root) to
+ *    the user, with no grant command anywhere in it: nothing was denied, so there
+ *    is nothing to grant. All five ride `additionalContexts`, so the
  *    model sees the diagnosis beside the failure rather than only in a log it
  *    never reads.
  * 2. **A bounded fail-fast, ACL family only.** With `enforceAfter` set, a call
@@ -154,6 +186,17 @@
  *    the classifier *can* place outside the workspace is a different case and is
  *    left silent on purpose: that is the sanctioned escalation path, not a
  *    puzzle, and a note about it would be noise.
+ * 4. **A pre-flight report of the one standing condition, temp-root family
+ *    only.** That family's condition exists *before* it fails, so the plugin
+ *    answers it once, on the first tracked call of a Windows agent, from the
+ *    public `ctx.sandboxPolicy.resolve({ session })` — the same resolver the
+ *    enforcing providers are handed. A session whose workspace contains the temp
+ *    root under `workspace-write` is told so before its first command instead of
+ *    after it, which matters here more than anywhere else because the failure
+ *    removes the only thing that could have investigated it. The verdict is
+ *    memoized per agent (`clear` as well as `reported`), so a host outside the
+ *    condition pays for the lookup once and never again; a Windows host where it
+ *    cannot be made at all says so on the host log rather than passing as clear.
  *
  * ## Honest boundaries
  *
@@ -173,7 +216,13 @@
  *   this plugin invented. The workspace-denial family is exercised the same way:
  *   the test builds the executors' own `sandbox` stamp and the shipped foreground
  *   projection, supplies `win32` as the platform fact, and covers both the
- *   recognized case and each of the narrowings that must stay silent.
+ *   recognized case and each of the narrowings that must stay silent. The
+ *   temp-root family needs no Windows either, and needs even less invention than
+ *   the others: what it recognizes is a sentence one line long, and the
+ *   pre-flight half is exercised by pointing the policy stand-in at a root that
+ *   really does contain the host's own `os.tmpdir()` — so the containment the
+ *   advice claims is computed by the same function the backend uses, on real
+ *   paths, rather than asserted.
  * - **It does not repair anything.** No ACL is written, no privilege is
  *   requested, nothing is elevated, no environment variable is set for another
  *   process, no preset is installed and no mode is changed: the remedies are the
@@ -182,7 +231,7 @@
  *   guard keys on *call identity* (identical arguments retried); this one keys
  *   on the *environment signature*, which is how several different commands can
  *   share one cause. They can be mounted together.
- * - **The real fix is upstream**, in all four families: the ACL failure should
+ * - **The real fix is upstream**, in all five families: the ACL failure should
  *   name
  *   the outstanding condition at the site that knows it (`grantWrite` computes
  *   `hasExactGrant`/`hasExactDeny`/`hasExactLabel` and discards which was
@@ -195,7 +244,12 @@
  *   already carries the ACE, so the descendants that missed the propagation are
  *   never repaired — the check would have to look past the root, or the denial
  *   surface would have to say *which* path was refused instead of only that one
- *   was. This plugin is the stopgap.
+ *   was. The temp-root family is the one whose assertion is already exact and
+ *   already names both operands: what it does not name is the **lever**, so the
+ *   fix there is at the reporting end — say which of the two paths the user can
+ *   move (they are not equally movable: the workspace is often the one they
+ *   chose, while the temp root is `GetTempPathW`'s answer) and how. This plugin
+ *   is the stopgap.
  *
  * @module @argszero/cordis-plugin-sandbox-grant-advisor
  */
@@ -205,12 +259,14 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { advisoryText, ACL_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
+import { tmpdir } from 'node:os'
+import { advisoryText, ACL_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, tempRootPreflightAdvisory, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
 import type { AdvisoryContext } from './advice.js'
 import {
   classifyNativeInitDeath,
   classifyProvisioningFailure,
   classifyPtyStartupFailure,
+  classifyTempRootRefusal,
   classifyWorkspaceDenial,
   hasWorkspaceDenialStamp,
 } from './signature.js'
@@ -220,6 +276,7 @@ import type {
   ProvisioningFailure,
   PtyStartupFailure,
   RecognizedFailure,
+  TempRootFailure,
   WorkspaceDenialFailure,
 } from './signature.js'
 import { confines, resolveSandboxMode, resolveWorkspaceRoot } from './mode.js'
@@ -231,10 +288,13 @@ import {
   observeSuccess,
   recordAdvice,
   recordDenial,
+  recordStanding,
   recordWithheld,
   shouldDeny,
+  standingOf,
 } from './state.js'
 import type { AgentState } from './state.js'
+import { tempRootInsideWorkspace } from './temp-root.js'
 
 export const name = 'sandbox-grant-advisor'
 
@@ -371,6 +431,37 @@ function nativeInitHostLine(failure: NativeInitFailure, mode: SandboxModeName): 
 }
 
 /**
+ * The one-line host-side account of a refused temp root.
+ *
+ * It carries both directories and the carrier, and deliberately no verdict about
+ * which of them a user should move: the plugin cannot know whether the workspace
+ * or the temp root is the one they chose, and the advisory hands the choice over
+ * rather than making it here.
+ * @param failure - the recognized failure.
+ * @returns a single log line.
+ */
+function tempRootHostLine(failure: TempRootFailure): string {
+  const carrier = failure.carrier === 'runner' ? 'the windows-acl runner' : 'the session-scoped provider'
+  return `sandbox-grant-advisor: ${carrier} refused to start a sandboxed command because its private temp `
+    + `root ${failure.tempRoot} lies inside the workspace ${failure.workspaceRoot} — a capability-disjointness `
+    + `invariant, so no permission grant applies and retrying cannot help; advisory delivered to the model `
+    + `(discussion ${TEMP_ROOT_DISCUSSIONS})`
+}
+
+/**
+ * The one-line host-side account of the standing condition, delivered pre-flight.
+ * @param workspaceRoot - the root the policy resolver reported.
+ * @param tempRoot - the temp root the executor would use.
+ * @returns a single log line.
+ */
+function tempRootPreflightHostLine(workspaceRoot: string, tempRoot: string): string {
+  return `sandbox-grant-advisor: this session's workspace ${workspaceRoot} contains the sandbox's temp root `
+    + `${tempRoot} under sandbox mode "workspace-write" — the ACL runner will refuse every command before it `
+    + `spawns, so the condition is reported before the first one fails; pre-flight advisory delivered to the `
+    + `model (discussion ${TEMP_ROOT_DISCUSSIONS})`
+}
+
+/**
  * Wrap one notice as a user-role message.
  *
  * The double cast encodes a documented fact the installed type cannot express:
@@ -415,7 +506,65 @@ function summaryOf(failure: RecognizedFailure, mode?: SandboxModeName): string {
     const subject = failure.paths[0] ?? 'a path in the workspace'
     return `denied inside the workspace (${subject}) under sandbox mode "${failure.mode}"`
   }
+  if (failure.family === 'temp-root-inside-workspace') {
+    const carrier = failure.carrier === 'runner' ? 'the runner' : 'the provider'
+    return `sandbox temp root lies inside the workspace — refused by ${carrier}`
+  }
   return `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
+}
+
+/**
+ * The outcome of the standing temp-root check.
+ *
+ * Three answers rather than a boolean, because two of the three "no" cases are
+ * different facts and only the caller knows where they have to go: `clear` is a
+ * decision that this session is not in the condition, and `unknown` is the
+ * plugin being unable to decide at all. Folding them together would make "the
+ * sandbox is fine" and "this plugin could not tell" read the same from the
+ * outside — the disclosure rule this plugin keeps for every other family.
+ */
+type StandingCheck =
+  /** The session is in the condition: its workspace contains the sandbox's temp root. */
+  | { readonly ok: true, readonly workspaceRoot: string, readonly tempRoot: string }
+  /** Decided, and the session is not in the condition. */
+  | { readonly ok: false, readonly why: 'clear' }
+  /** Not decidable on this host, and why. */
+  | { readonly ok: false, readonly why: 'unknown', readonly detail: string }
+
+/**
+ * Decide whether one agent's session is already in the temp-root condition.
+ *
+ * The platform gate comes first, so a session on a host the rule cannot apply to
+ * never pays for the policy lookup — the invariant belongs to the Windows ACL
+ * backend's two capabilities, and every other backend has no such pair. After
+ * that it is the same request the enforcing providers are handed, and the same
+ * fail-closed posture `src/mode.ts` documents: a mode or a root that cannot be
+ * resolved is *not* an invitation to assume the deployment default, because a
+ * session that overrode its mode would then be reported as confined.
+ *
+ * A path that does not resolve makes {@link tempRootInsideWorkspace} answer
+ * "no violation", which is the fail-closed direction here for the same reason it
+ * is there: the prediction can only ever stay silent.
+ * @param ctx - the plugin's context.
+ * @param agent - the agent whose session is being placed.
+ * @returns the violation, a decided clear, or the reason nothing could be decided.
+ */
+function standingCondition(ctx: Context, agent: Agent): StandingCheck {
+  if (process.platform !== 'win32') return { ok: false, why: 'clear' }
+  const mode = resolveSandboxMode(ctx, agent)
+  if (!mode.ok) return { ok: false, why: 'unknown', detail: mode.withheld }
+  const root = resolveWorkspaceRoot(ctx, agent)
+  if (!root.ok) return { ok: false, why: 'unknown', detail: root.withheld }
+  const tempRoot = tmpdir()
+  if (!tempRootInsideWorkspace({
+    platform: process.platform,
+    mode: mode.mode,
+    workspaceRoot: root.workspaceRoot,
+    tempRoot,
+  })) {
+    return { ok: false, why: 'clear' }
+  }
+  return { ok: true, workspaceRoot: root.workspaceRoot, tempRoot }
 }
 
 /**
@@ -483,8 +632,18 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   /**
-   * Read one settled call: advance the state, and decide whether it is the
-   * failure the model needs told about.
+   * Read one settled call: advance the state, and decide what the model must be
+   * told — the failure it just hit, or the standing condition this session is
+   * already in.
+   *
+   * The order is not arbitrary. A call that really is one of the five failures
+   * carries the producer's own line, which the pre-flight report cannot have, so
+   * the failures are asked first and the standing check speaks only on a call
+   * that produced no diagnosis at all. In a session the standing condition is
+   * true of, that is the first tool call of any kind — including a file read,
+   * because this family is not discovered by running a command: it is a
+   * relationship between two directories, and by the time a command could show
+   * it there is no command left to run.
    * @param exec - the call that just ran.
    * @param result - its settled outcome.
    * @returns the notice to attach, or undefined.
@@ -498,6 +657,29 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     const key = callKey(exec.name, exec.arguments)
     const previous = states.get(agent)
+    return inspectOutcome(agent, previous, exec, result, key) ?? inspectStanding(agent)
+  }
+
+  /**
+   * Classify one settled call against the five failure families.
+   *
+   * Everything here is driven by the settled result, and every branch that
+   * recognizes one of them claims the family's once-per-agent advisory for this
+   * agent before returning.
+   * @param agent - the agent whose call ran.
+   * @param previous - the agent's state before this call, if any.
+   * @param exec - the call that just ran.
+   * @param result - its settled outcome.
+   * @param key - the identity of the call.
+   * @returns the notice to attach, or undefined.
+   */
+  function inspectOutcome(
+    agent: Agent,
+    previous: AgentState | undefined,
+    exec: ToolExecution,
+    result: ToolExecutionResult,
+    key: string,
+  ): UserMessage | undefined {
     if (result.isError !== true) {
       // A result the pipeline calls a success is not automatically a working
       // environment: the native-init death arrives exactly here, as the
@@ -518,32 +700,83 @@ export function apply(ctx: Context, config: Config = {}): void {
       if (previous !== undefined) states.set(agent, observeSuccess(previous, key))
       return undefined
     }
-    // The two text families read different fields, on purpose. The ACL signature
-    // carries an API name plus a Win32 code, which a command's own output does
-    // not fabricate, so that family may read the merged text (`error.message`
-    // with the rendered content as its fallback). The persistent-shell
-    // signature is a bare sentence, and the rendered content is exactly where a
-    // runner-failure path could carry a command's output — so this family reads
-    // `error.message` alone, the field the layer that threw it filled in. A
-    // sentence quoted from a log must never make this plugin tell a working
-    // session that its shell is dead.
+    // Three text families read two different fields, on purpose. The ACL
+    // signature carries an API name plus a Win32 code, which a command's own
+    // output does not fabricate, so that family may read the merged text
+    // (`error.message` with the rendered content as its fallback). The
+    // persistent-shell signature is a bare sentence, and the temp-root signature
+    // is a sentence with two operands — and for both of those the rendered
+    // content is exactly where a runner-failure path could carry a command's own
+    // output, so those two read `error.message` alone, the field the layer that
+    // threw them filled in. A sentence quoted from a log must never make this
+    // plugin tell a working session that its shell is dead, or that its sandbox
+    // cannot start.
     //
     // Honest about the limit: with the current `dsh-tools` runtime the rendered
     // content of an error result is derived from `error.message`, so today the
-    // two reads agree and this choice is not observable from outside — an
-    // injection arm that swaps in the merged text leaves the suite green, and
-    // that is recorded rather than papered over. The narrower read is kept
-    // because the agreement is the runtime's rendering choice, not a promise
-    // this plugin can rely on: a tool whose `render` produces output of its own
-    // is exactly the case the whole-line rule exists for.
+    // reads agree and the choice is not observable from outside — an injection
+    // arm that swaps in the merged text leaves the suite green, and that is
+    // recorded rather than papered over. The narrower read is kept because the
+    // agreement is the runtime's rendering choice, not a promise this plugin can
+    // rely on: a tool whose `render` produces output of its own is exactly the
+    // case the narrower rule exists for.
     const failure = classifyProvisioningFailure(failureText(result))
       ?? classifyPtyStartupFailure(result.error.message)
+      ?? classifyTempRootRefusal(result.error.message)
     if (failure === undefined) return undefined
     if (failure.family === 'pty-startup') return adviseGated(agent, previous, failure, key, exec.name)
+    if (failure.family === 'temp-root-inside-workspace') {
+      // No gate and no policy lookup here, unlike the two mode-gated families:
+      // the producer's sentence carries both operands, and the mode is a fact of
+      // the producer's own call site — the assertion exists only on the
+      // `workspace-write` path, so a refusal cannot come from another mode.
+      if (!claimAdvice(agent, previous, failure, key)) return undefined
+      ctx.logger.warn(tempRootHostLine(failure))
+      return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
+    }
 
     if (!claimAdvice(agent, previous, failure, key)) return undefined
     ctx.logger.warn(aclHostLine(failure))
     return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
+  }
+
+  /**
+   * Report the standing temp-root condition once per agent, ahead of any failure.
+   *
+   * This is the plugin's only prediction, and three things about it are chosen
+   * rather than convenient. It is asked **once per agent** and the verdict is
+   * memoized either way, so a host that is clear of the condition pays for one
+   * resolution and never again — the alternative, re-asking on every tracked
+   * call, would put a policy lookup in the path of every Windows tool call to
+   * answer a question whose answer cannot change within a session. It is asked
+   * only when nothing above recognized a failure, so it never displaces the
+   * producer's own line. And when a **Windows** host cannot answer at all — no
+   * policy service, no session, a resolver that throws — that is said on the
+   * host log rather than passed off as clear: silence there would read the same
+   * as "this session is fine", which is the disclosure rule this plugin keeps
+   * everywhere, and on no other host does the question arise.
+   * @param agent - the agent whose call just settled.
+   * @returns the pre-flight notice, or undefined.
+   */
+  function inspectStanding(agent: Agent): UserMessage | undefined {
+    if (standingOf(states.get(agent)) !== 'pending') return undefined
+    const check = standingCondition(ctx, agent)
+    states.set(agent, recordStanding(states.get(agent), check.ok ? 'reported' : 'clear'))
+    if (!check.ok) {
+      if (check.why === 'unknown') {
+        ctx.logger.warn(
+          'sandbox-grant-advisor: the standing temp-root condition could not be checked — '
+          + `${check.detail}; nothing was reported, and this is NOT a claim that the session is clear of it `
+          + `(discussion ${TEMP_ROOT_DISCUSSIONS})`,
+        )
+      }
+      return undefined
+    }
+    ctx.logger.warn(tempRootPreflightHostLine(check.workspaceRoot, check.tempRoot))
+    return notice(
+      tempRootPreflightAdvisory(check.workspaceRoot, check.tempRoot, href),
+      'sandbox temp root lies inside the workspace — commands will be refused',
+    )
   }
 
   /**

@@ -586,6 +586,96 @@ const MUTATIONS = [
       '#   - one more fact about the missing right: asking a directory that',
     ]],
   },
+  {
+    // 0.15.0's family. The operands ARE the recognition: the assertion's sentence
+    // alone is what a log line, a transcript or a pasted issue body carries, and
+    // advising about the sandbox there would be advice about the wrong thing. The
+    // message is the only input — the containment it implies is never recomputed —
+    // so a match with no operands has nothing to say and must be refused.
+    name: 'the temp-root recognition accepts the sentence alone, with no operands',
+    file: 'src/signature.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [['if (workspaceRoot.length === 0 || tempRoot.length === 0) return undefined', '/* the operands are not required */']],
+  },
+  {
+    // The two carriers fire at different moments and only one of them has
+    // anything on stderr; collapsing them makes `#9175`'s two-producer fact
+    // unreadable exactly where a maintainer needs it.
+    name: 'the two producers collapse into one, so the runner refusal reads as the provider',
+    file: 'src/signature.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [["const carrier: TempRootCarrier = line.includes(RUNNER_SIGNATURE) ? 'runner' : 'pre-spawn'", "const carrier: TempRootCarrier = 'pre-spawn'"]],
+  },
+  {
+    // The invariant is a Windows ACL capability pair; on Landlock/Seatbelt/bwrap
+    // the same two paths are ordinary directories and the claim would be a
+    // prediction from a mechanism the host does not have.
+    name: 'the pre-flight platform gate is dropped, so every host is told its commands cannot start',
+    file: 'src/temp-root.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [["  if (facts.platform !== 'win32') return false", '  /* the platform is not checked */']],
+  },
+  {
+    // `read-only` materializes no private temp capability, so the assertion is
+    // never reached there and the condition does not exist to report.
+    name: 'the pre-flight mode gate is dropped, so a read-only session is warned about a capability it does not have',
+    file: 'src/temp-root.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [['  if (facts.mode !== PREFLIGHT_MODE) return false', '  /* every mode is treated alike */']],
+  },
+  {
+    // The canonical comparison is the whole value of the prediction: a string
+    // prefix disagrees with the executor on a sibling whose name extends the
+    // root's, which is the shape a naive test gets wrong.
+    name: 'the containment test degrades to a string prefix, so a sibling of the root reads as inside it',
+    file: 'src/temp-root.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [[
+      "  return relation === '' || (!isAbsolute(relation) && relation !== '..' && !relation.startsWith(`..${sep}`))",
+      '  return realpathSync.native(candidate).startsWith(realpathSync.native(root))',
+    ]],
+  },
+  {
+    // The platform fact comes first so no host pays for a family it cannot have,
+    // and so the question is never asked off Windows — where it cannot arise.
+    name: 'the pre-flight platform fact is checked after the policy lookup, so every host pays for it',
+    file: 'src/index.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [["  if (process.platform !== 'win32') return { ok: false, why: 'clear' }", '  /* the host is not consulted */']],
+  },
+  {
+    // The one thing this family must never do: a refusal that precedes any
+    // process is not an ACL problem, and a grant line is advice for a problem the
+    // reader does not have — the same defect §1's standing-grant section refuses.
+    name: 'the temp-root advisory ships a grant command for a refusal that precedes any process',
+    file: 'src/advice.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [[
+      "    '  This is not an ACL problem and no `icacls` grant fixes it: the refusal happens while the sandbox is',",
+      "    '  Fix it with `icacls \"<dir>\" /grant \"<account>:(OI)(CI)F\"`: the refusal happens while the sandbox is',",
+    ]],
+  },
+  {
+    // The remedy is the environment, and `%TMP%` is the lever the reader has to
+    // be handed: `GetTempPathW` reads it first. Naming a variable the platform
+    // does not read gives the reader a change that does nothing — the exact
+    // "diagnosis with no path forward" this plugin exists to remove.
+    name: 'the temp-root remedy names a variable the platform does not read',
+    file: 'src/advice.ts',
+    arms: 'temp-root.spec.mjs',
+    edits: [[
+      "    '       cmd:         set TMP=C:\\\\dsh-temp        (then start the harness from that same prompt)',",
+      "    '       cmd:         set DSH_TMP=C:\\\\dsh-temp     (then start the harness from that same prompt)',",
+    ]],
+  },
+  {
+    // The mount instructions are published prose with no compiler over them, and
+    // this family's only thread is the report the whole section exists for.
+    name: 'the mount instructions drop the fifth family\'s thread',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [['# A FIFTH family is a pre-spawn refusal with no ACL in it at all (#9175): the', '# A FIFTH family is a pre-spawn refusal with no ACL in it at all: the']],
+  },
 ]
 
 let silent = 0

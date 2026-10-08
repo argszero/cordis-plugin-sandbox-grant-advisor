@@ -209,6 +209,67 @@
 # the label half either, because the refusal precedes the ACL). It ships NO
 # repair command, for the reason the standing-grant section ships none: this
 # project has no Windows host to verify a line on.
+#
+# A FIFTH family is a pre-spawn refusal with no ACL in it at all (#9175): the
+# session's workspace CONTAINS the sandbox's private temp root, and the backend
+# refuses to materialize that capability rather than nest a revocable one inside
+# a standing one. On Windows the per-user temp root is
+# `C:\Users\<you>\AppData\Local\Temp`, so a session opened on the profile
+# directory — or any ancestor of it — has every command under `workspace-write`
+# refused at once, `echo test` included, with no subprocess output and an error
+# that names neither operand to move nor the lever that moves it. The file tools
+# keep working: they never spawn the sandbox runner. The invariant is
+#
+#   assertTempRootOutsideWorkspace(workspaceRoot, tempRoot)
+#
+# and its own comment gives the reason — "every child created below it would
+# inherit the standing workspace capability". The two directories are compared
+# CANONICALLY (`realpathSync.native` on both, then `path.relative`), so it is a
+# filesystem fact rather than a spelling.
+#
+# ONE SENTENCE, TWO PRODUCERS, and a fix has to satisfy both: the session-scoped
+# provider asserts it while it assembles the runner's argv (no child ever existed
+# — which is why the call reports no output at all), and the runner asserts the
+# same pair again for `workspace-write` before it spawns (stderr behind
+# `windows-acl-run: `, exit 127, reclassified by the seam into a
+# `SandboxUnavailableError`). The advisory names which carrier refused. It is read
+# from the thrown error's own message — never from rendered output — so a command
+# whose own output quotes the sentence is an ordinary success and is left alone.
+#
+# It ships no repair command, because there is nothing to repair: the refusal
+# happens while the sandbox is deciding whether it can set up its own
+# capabilities, before any process is created, and no `icacls` grant, no
+# elevation and no ownership change affects it. What moves the condition is the
+# ENVIRONMENT, and it is the user's move because the failure took command
+# execution away — there is no shell left to run a remedy in:
+#
+#   - point the harness's temp directory outside the workspace before it starts.
+#     `os.tmpdir()` on Windows is `GetTempPathW` (`%TMP%`, then `%TEMP%`, then
+#     `%USERPROFILE%`), so `set TMP=C:\dsh-temp` — the directory created first,
+#     since the check resolves both paths — in the process that LAUNCHES the
+#     harness is enough;
+#   - or open the session on a workspace that is not an ancestor of the temp root
+#     (`C:\work\project` rather than `C:\Users\<you>`).
+#
+# `read-only` is deliberately unaffected (no private temp capability is
+# materialized, so the assertion is never reached) and `danger-full-access` never
+# spawns through the sandbox at all, so passing under it is consistency rather
+# than a workaround. The advisory says both, because both are the next ideas the
+# diagnosis invites.
+#
+# This is also the plugin's ONLY prediction, and the family's second seat: on
+# Windows, before the first tracked call, it asks the public
+# `ctx.sandboxPolicy.resolve({ session })` for the mode and the workspace root and
+# compares the root against `os.tmpdir()` with the backend's own canonical
+# computation, so a `workspace-write` session in the condition is told BEFORE its
+# first command fails. The two seats are separate on purpose — if a refusal does
+# happen, the producer's line and the carrier that wrote it are facts only the
+# failure half can have, and a second advisory follows. The pre-flight prints the
+# facts it computed so the claim can be audited, and states the one verification
+# available when no command can be run: if a command does run in this session,
+# the condition does not apply and the message can be ignored. A Windows host
+# that cannot answer at all is disclosed once on the host log rather than passed
+# off as clear.
 
 - insert:
     - id: sandbox-grant-advisor

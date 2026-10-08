@@ -1,5 +1,5 @@
 /**
- * Recognize the four environment failures this plugin explains, and refuse
+ * Recognize the five environment failures this plugin explains, and refuse
  * everything else.
  *
  * ## The ACL provisioning failure (`acl-provisioning`)
@@ -223,6 +223,66 @@
  * therefore part of recognition, passed in rather than read, and the suite runs
  * this family with the platform fact supplied.
  *
+ * ## The temp root that lives inside the workspace (`temp-root-inside-workspace`)
+ *
+ * The fifth family is not a failure of any command: it is a **pre-spawn
+ * invariant** that takes the whole command executor with it. `#9175` is the
+ * report, and the failing text is a bare internal assertion:
+ *
+ *   Windows ACL temp root must be outside the workspace: workspace=C:\Users; temp=C:\Users\<name>\AppData\Local\Temp
+ *
+ * Under `workspace-write` a private temp ROOT inside the workspace makes the
+ * backend refuse to start **any** process — `echo test` included, with no
+ * subprocess output at all — while the file tools keep working, because they
+ * never spawn that runner. The failure names neither the operand the user can
+ * move nor the lever that moves it.
+ *
+ * Why the rule exists, in the module's own words: "every child created below it
+ * would inherit the standing workspace capability"
+ * (`packages/sandbox/sandbox-windows-acl/src/path-boundary.ts:22`, called at the
+ * first statement of `sandbox-local`'s `materializeAclGrant`,
+ * `packages/sandbox/sandbox-local/src/index.ts:404`). The pair is the *standing*
+ * workspace ACE and the *revocable* private temp capability; a temp root under
+ * the workspace root would put the revocable half inside the standing one, where
+ * it stops being revocable. It is a capability-disjointness rule, not a verdict
+ * on the workspace.
+ *
+ * **One sentence, two producers**, and both are recognized — which matters beyond
+ * completeness, because a fix has to satisfy both:
+ *
+ * - the **session-scoped** path asserts it while the runner argv is being
+ *   assembled, before any child exists, so it arrives as a thrown error whose
+ *   message is the sentence itself;
+ * - the **runner** asserts the same pair again for `workspace-write` before it
+ *   spawns the child (`sandbox-windows-acl/src/runner.ts:131`), where the
+ *   refusal is written to stderr behind the runner's own `windows-acl-run: `
+ *   marker and exits 127 — and because that code and marker are exactly the
+ *   seam's `RUNNER_FAILURE_RULES['windows-acl']` entry, the shell executors
+ *   reclassify it as a runner failure and the sentence reaches the session again
+ *   as the `Runner failure: ` detail of `SandboxUnavailableError`.
+ *
+ * The producer's sentence therefore carries **both operands**, which is why this
+ * family needs no policy lookup of its own: `classifyTempRootRefusal` reads them
+ * off the line rather than resolving a mode or a root, and the mode is a fact the
+ * producer's own site fixes — the assertion exists only on the `workspace-write`
+ * path (the `read-only` branch passes the ambient temp root through and asserts
+ * nothing, because there is no capability to keep disjoint).
+ *
+ * **It is read from `error.message` alone**, never from the merged text, and that
+ * is the narrower read rather than a convenience: the sentence is *thrown* by
+ * both carriers, so the field the throwing layer filled in is where it lives. A
+ * command that merely prints the sentence produces a finished run (nonzero exits
+ * are reported, not errored), and a transcript or an issue body that quotes it is
+ * not an error result at all.
+ *
+ * **The operands are not re-tested here**, deliberately. The message prints the
+ * workspace as the policy canonicalized it and the temp root as `os.tmpdir()`
+ * returned it, while the assertion itself compares `realpathSync.native` of both
+ * — two different normalizations of the same pair. A string containment test in
+ * this module would therefore be *less* faithful than the check that produced the
+ * line and could refuse a genuine report; the producer's own sentence is the
+ * recognition, exactly as the ACL family's `Win32` line is.
+ *
  * @module
  */
 
@@ -255,6 +315,8 @@ export type FailureFamily =
   | 'native-init'
   /** A confined command was denied a path inside its own workspace (Windows ACL). */
   | 'workspace-denial'
+  /** The sandbox's private temp root lies inside the workspace it is granted against. */
+  | 'temp-root-inside-workspace'
 
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
@@ -376,6 +438,72 @@ export type RecognizedFailure =
   | PtyStartupFailure
   | NativeInitFailure
   | WorkspaceDenialFailure
+  | TempRootFailure
+
+/**
+ * The assertion's own words, kept as a constant so nothing can drift.
+ *
+ * Both producers throw the same `Error`, whose message is this sentence followed
+ * by the two operands — which is why one recognition covers both and why the
+ * mode never has to be resolved to place a failure.
+ */
+export const TEMP_ROOT_ASSERTION = 'Windows ACL temp root must be outside the workspace'
+
+/**
+ * The marker the windows-acl runner puts in front of every runner-side failure.
+ *
+ * Spelled here for the same reason `RUNNER_FAILURE_RULES` spells it upstream: the
+ * child carrier's line is the sentence *behind* this prefix, so telling the two
+ * carriers apart is a comparison against this string and nothing else.
+ */
+export const RUNNER_SIGNATURE = 'windows-acl-run:'
+
+/**
+ * Which of the two producers refused, as the plugin read it off the line.
+ *
+ * The distinction is not cosmetic: it is *when* the refusal happened. The
+ * session-scoped carrier asserts while the runner argv is assembled, so no child
+ * was ever created; the runner carrier asserts inside the runner process, before
+ * it spawns the confined child. Both read the same pair of paths, so a change to
+ * the rule has to satisfy both — which is the fact a maintainer needs and a
+ * session cannot see from the outside.
+ */
+export type TempRootCarrier =
+  /** The session-scoped provider, while assembling the runner invocation. */
+  | 'pre-spawn'
+  /** The windows-acl runner, before it spawns the confined child. */
+  | 'runner'
+
+/**
+ * The sandbox refusing to start because its private temp root is inside the
+ * workspace it grants against.
+ *
+ * Both operands are kept verbatim from the producer's own line rather than
+ * re-derived, because the advisory's whole claim is a statement about *these two
+ * paths* — the pair the executor compared, not a pair this plugin reconstructed.
+ */
+export interface TempRootFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'temp-root-inside-workspace'
+  /** Which producer refused, for the fact of when it happened. */
+  readonly carrier: TempRootCarrier
+  /** The workspace root, as the producer printed it. */
+  readonly workspaceRoot: string
+  /** The temp root, as the producer printed it. */
+  readonly tempRoot: string
+}
+
+/**
+ * The producer's sentence plus its two operands.
+ *
+ * Anchored on the assertion itself, so the only text that matches is a line that
+ * *is* the producer's — and the operands are taken verbatim from the format
+ * `path-boundary.ts` writes. `workspace=` is captured lazily so a separator
+ * inside the temp path cannot move the split; the temp operand runs to the end of
+ * the line, which is where both carriers end it (the runner's own marker sits in
+ * front of the sentence, not behind it).
+ */
+const TEMP_ROOT_SIGNATURE = /Windows ACL temp root must be outside the workspace: workspace=(.+?); temp=([^\r\n]+)/
 
 /**
  * The producer's format is fixed by `Win32Error`
@@ -483,6 +611,12 @@ export function classifyNativeInitDeath(value: unknown): NativeInitFailure | und
 export function failureLine(failure: RecognizedFailure): string {
   if (failure.family === 'pty-startup') return failure.line
   if (failure.family === 'native-init') return `[exit code: ${String(failure.rawExitCode)}]`
+  if (failure.family === 'temp-root-inside-workspace') {
+    // Both carriers' lines reproduce exactly: the runner prefixes its own marker,
+    // the session-scoped provider writes the sentence bare.
+    const marker = failure.carrier === 'runner' ? `${RUNNER_SIGNATURE} ` : ''
+    return `${marker}${TEMP_ROOT_ASSERTION}: workspace=${failure.workspaceRoot}; temp=${failure.tempRoot}`
+  }
   if (failure.family === 'workspace-denial') {
     const status = failure.exitCode === null ? '' : `[exit code: ${String(failure.exitCode)}] `
     return `${status}sandbox: { mode: "${failure.mode}", denied: true }`
@@ -598,4 +732,37 @@ export function classifyWorkspaceDenial(
     paths: named,
     workspaceRoot: facts.workspaceRoot,
   }
+}
+
+/**
+ * Classify one failure message as the sandbox refusing to start because its
+ * private temp root lies inside the workspace.
+ *
+ * Read from the **thrown error's own message** — never from the merged text —
+ * because the producers throw it: the session-scoped provider throws the bare
+ * sentence, and the runner's carrier reaches the session as the same sentence
+ * behind its own marker inside `SandboxUnavailableError`'s `Runner failure: `
+ * detail. A command that prints the sentence finishes as a run and never becomes
+ * an error result, and a transcript or issue body quoting it is not one either,
+ * so the narrower field is both sufficient and the fail-closed direction.
+ *
+ * Recognition is the producer's sentence plus its two operands, and nothing else
+ * is re-tested: the printed operands are the policy-canonicalized workspace and
+ * raw `os.tmpdir()`, while the assertion compared `realpathSync.native` of both,
+ * so a containment test here would be a *different* test than the one that fired.
+ * @param message - the failure text, from the result's `error.message`.
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyTempRootRefusal(message: string): TempRootFailure | undefined {
+  const match = TEMP_ROOT_SIGNATURE.exec(message)
+  if (match === null) return undefined
+  const workspaceRoot = (match[1] ?? '').trim()
+  const tempRoot = (match[2] ?? '').trim()
+  if (workspaceRoot.length === 0 || tempRoot.length === 0) return undefined
+  // The runner's line is the sentence behind its marker, so the marker's presence
+  // elsewhere on the *same line* is what names the child carrier — read off the
+  // line the sentence sits on, since the match itself starts at the assertion.
+  const line = message.split(/\r?\n/).find(candidate => candidate.includes(TEMP_ROOT_ASSERTION)) ?? ''
+  const carrier: TempRootCarrier = line.includes(RUNNER_SIGNATURE) ? 'runner' : 'pre-spawn'
+  return { family: 'temp-root-inside-workspace', carrier, workspaceRoot, tempRoot }
 }
