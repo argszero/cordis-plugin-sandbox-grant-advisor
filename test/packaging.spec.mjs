@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
-import { ACL_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
+import { ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
@@ -191,12 +191,12 @@ test('the shipped bundle patch describes the family the advice module covers, an
   for (const id of tracked) {
     assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
   }
-  // All five families, not only the first: the patch documents what the plugin
+  // All six families, not only the first: the patch documents what the plugin
   // recognizes, and a family whose threads are missing from it is a family the
   // mount instructions do not admit exists. The last release that added threads
   // to the second and third families left this file behind for exactly that
   // reason — only the first list was wired to an assertion.
-  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS], ['the temp-root family', TEMP_ROOT_DISCUSSIONS]]) {
+  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS], ['the temp-root family', TEMP_ROOT_DISCUSSIONS], ['the CIM/WMI family', CIM_WMI_DISCUSSIONS]]) {
     for (const id of discussions.match(/#\d+/g) ?? []) {
       assert.ok(patch.includes(id), `the bundle patch never names ${id} (${name}), which the advisories cover`)
     }
@@ -219,6 +219,16 @@ test('the shipped bundle patch describes the family the advice module covers, an
   // And the first family's independent confirmation, which is the difference
   // between a reading of the source and a measurement of it.
   assert.ok(/confirmed from outside/.test(patch), 'the bundle patch does not carry the independent confirmation of the missing right')
+  // The sixth family is the one whose mechanism the harness documents, so the
+  // patch has to say what the family adds on top of that sentence rather than
+  // retell it: the two shapes that answer wrongly with no error, and the
+  // measured native substitutes. A mount instruction carrying only the code
+  // would tell a reader what failed and not what to run instead, which is the
+  // half #9272 asked for first.
+  assert.ok(/0x80041003/.test(patch), 'the bundle patch does not name the status code the sixth family is recognized by')
+  assert.ok(/Get-PSDrive/.test(patch), 'the bundle patch does not name the silent wrong-value shape the sixth family warns about')
+  assert.ok(/SilentlyContinue/.test(patch), 'the bundle patch does not name the error-suppression shape that turns a refusal into an empty result')
+  assert.ok(/netstat -ano/.test(patch), 'the bundle patch does not hand over a measured native substitute')
 })
 
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {

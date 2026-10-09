@@ -3,7 +3,7 @@
  * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test, one family at a time. The five families are shaped by the same
+ * by a test, one family at a time. The six families are shaped by the same
  * question — is this the sandbox's doing, and what can the reader do about it —
  * and they answer it differently:
  *
@@ -179,6 +179,36 @@
  *   to be falsifiable — it prints the three facts it computed (host, mode, both
  *   paths) and says that a command which runs anyway is evidence the prediction did
  *   not apply. Nothing is granted, escalated or moved by this plugin in either half.
+ * - **The CIM/WMI boundary** (`cim-wmi-denial`, #9272) is the sixth, and it is the
+ *   only one whose mechanism **the harness already documents**: the Windows ACL
+ *   backend's own README says Authenticated Users is absent from both of its token
+ *   lists, so the WMI namespace security check fails with `0x80041003` and CIM is
+ *   unavailable in every confined mode. Carrying it anyway is the posture the ACL
+ *   family already takes with {@link PREREQUISITE} — a documented limitation that
+ *   the *error* does not name is exactly what this module exists to deliver at the
+ *   moment it happens. It is a **value-read** family like `native-init`: a cmdlet
+ *   error inside a command that ran is a nonzero exit, which the shipped shell
+ *   tools report without marking the result an error, so the code lives in the
+ *   settled value's own `stderr`. What the advisory adds beyond upstream's
+ *   sentence is what the reporter asked for first and the README does not supply:
+ *   the **native substitute for each command that stops working**, and the two
+ *   shapes in which this boundary answers with a **wrong value and no error at
+ *   all** — `Get-PSDrive`'s usage columns falling back to `0`, and any CIM call
+ *   under `-ErrorAction SilentlyContinue` returning an empty result, which a
+ *   caller reads as "nothing is there" when the query never ran. That second shape
+ *   is why the family exists for agents and not only for humans: an empty CIM
+ *   result has no failure signal at all, and the next action it invites is
+ *   destructive.
+ *
+ *   Its remedy is deliberately **not** a permission grant, and the text says why
+ *   rather than only what: no ACE names CIM, no elevation reaches it, and the one
+ *   repair a reader naturally proposes — admitting read access to `root/cimv2` —
+ *   is a change to the restricted token rather than to a file, priced against the
+ *   escape that dropping Authenticated Users from those lists closes. Because the
+ *   plugin cannot say whether that trade is worth making, and because nobody has
+ *   measured which of the token's checks refuses the namespace, the advisory
+ *   quotes upstream's own sentence for the mechanism and declines to price a
+ *   narrower fix from its own evidence.
  *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
@@ -206,11 +236,16 @@
  * finding: it prints both operands it computed, and — since no command can be run
  * in the session to check anything — it states that a command which runs anyway
  * falsifies the report, which is the one verification available without a shell.
+ * The CIM/WMI family is the one whose discriminator is **shared with upstream**:
+ * the reason it can be named at all is a sentence the backend's own README
+ * carries, so the advisory quotes it as the authority and states what it adds on
+ * top (the substitutes and the silent-value rules) instead of presenting a
+ * documented boundary as a discovery.
  *
  * @module
  */
 
-import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, TempRootFailure, WorkspaceDenialFailure, RecognizedFailure } from './signature.js'
+import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, TempRootFailure, WorkspaceDenialFailure, CimDenialFailure, RecognizedFailure } from './signature.js'
 import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
@@ -294,6 +329,23 @@ export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383 / #8421 / #8409'
 export const TEMP_ROOT_DISCUSSIONS = '#9175'
 
 /**
+ * The upstream threads the CIM/WMI advisory is a stopgap for.
+ *
+ * `#9272` is the report: all CIM/WMI access refused under a confining mode with
+ * the native substitutes and the two silent-value shapes measured on one machine,
+ * which is why the advisory can hand over a table instead of a suggestion. The
+ * other four are the report's own neighbours and are named because the thread
+ * presents itself as the fourth face of one boundary: `#1157` (no outbound
+ * network under the same restricted token), `#4163` and `#997` (Schannel TLS
+ * failing with `SEC_E_NO_CREDENTIALS`), and `#1847` (external processes dying
+ * with `0xC0000142`) are already covered by this plugin's other families or are
+ * outside them, but a reader who has just hit a fourth manifestation is better
+ * served by seeing that the boundary is one and not four puzzles. Naming them is
+ * also the honest scope statement: this advisory explains the CIM face only.
+ */
+export const CIM_WMI_DISCUSSIONS = '#1157 / #4163 / #997 / #1847 / #9272'
+
+/**
  * The thread list each family's withholding note cites.
  *
  * A withheld recognition is a decision the host log has to account for, and the
@@ -310,6 +362,7 @@ export const DISCUSSIONS_OF: Record<FailureFamily, string> = {
   'native-init': NATIVE_INIT_DISCUSSIONS,
   'workspace-denial': WORKSPACE_DENIAL_DISCUSSIONS,
   'temp-root-inside-workspace': TEMP_ROOT_DISCUSSIONS,
+  'cim-wmi-denial': CIM_WMI_DISCUSSIONS,
 }
 
 /** The documented prerequisite, quoted from the backend's README. */
@@ -367,7 +420,10 @@ export interface AdvisoryContext {
    * The sandbox mode the failing call ran under. Required by the
    * `pty-startup` family — the whole diagnosis is the mode — and by the
    * `native-init` family, whose gate is the same question; unused by the ACL
-   * family.
+   * family. The `cim-wmi-denial` family requires it too, and for a third
+   * reason: the condition holds under BOTH confining modes, so the text names
+   * the mode to keep the two halves of that claim auditable rather than
+   * asserting a mode the caller never resolved.
    */
   readonly mode?: SandboxModeName
   /**
@@ -693,6 +749,12 @@ export function advisoryText(failure: RecognizedFailure, context: AdvisoryContex
   }
   if (failure.family === 'workspace-denial') return workspaceDenialAdvisory(failure, context.tool, context.href)
   if (failure.family === 'temp-root-inside-workspace') return tempRootAdvisory(failure, context.tool, context.href)
+  if (failure.family === 'cim-wmi-denial') {
+    if (context.mode === undefined) {
+      throw new Error('sandbox-grant-advisor: the CIM/WMI advisory requires the resolved sandbox mode')
+    }
+    return cimWmiAdvisory(failure, context.mode, context.href)
+  }
   return aclAdvisory(failure, context.href)
 }
 
@@ -1442,6 +1504,142 @@ export function tempRootPreflightAdvisory(workspaceRoot: string, tempRoot: strin
     '',
     'This warning is not a substitute for the refusal\'s own report: if a command is refused, a second advisory',
     'carries the producer\'s line and names which of the two carriers refused. This is a stopgap, ' + where + '.',
+  ].join('\n')
+}
+
+/**
+ * The upstream statement of this boundary, quoted from the backend's own README.
+ *
+ * It is quoted rather than paraphrased for two reasons. It is the authority for
+ * the mechanism — this plugin has no Windows host and did not measure which of
+ * the token's checks refuses the namespace — and its presence in the advisory is
+ * what keeps the plugin honest about what it is adding: the substitutes for the
+ * commands that stop working, and the two shapes that produce a wrong value with
+ * no error at all. A reader told "this is documented" is better served than one
+ * told a mechanism as if it were a finding.
+ *
+ * Source: `packages/sandbox/sandbox-windows-acl/README.md`, repeated in the same
+ * package's `src/token.ts` doc comment and pinned by two arms of
+ * `tests/runner.spec.ts` that assert `CIM: DENIED` under both confined modes.
+ */
+export const CIM_DOCUMENTED_LIMIT = 'Authenticated Users is absent from both lists — the WMI namespace security check '
+  + 'fails (0x80041003), so CIM cmdlets and Get-ComputerInfo are unavailable in every confined mode, '
+  + 'and the C:\\-root tree-creation escape is closed'
+
+/**
+ * The measured native substitutes, one pair per fact the reader may need.
+ *
+ * Every pair is the reporter's own measurement on one machine under a
+ * workspace-write session (`#9272`), which is what makes this a table this
+ * plugin can hand over rather than a suggestion: the failing command and the
+ * working replacement were run at the same moment and both results are recorded.
+ * Two entries are files what the report lists as *unaffected controls* rather than
+ * replacements — `Get-Process` and `Get-Service` never went through CIM — and they
+ * are carried because "which of my usual commands still work" is the question a
+ * reader arrives with. The one thing the table must not do is fill a gap it did
+ * not measure, so `Get-NetIPAddress` and `Get-NetAdapter` are absent from it and
+ * the advisory says so out loud.
+ */
+export const CIM_SUBSTITUTES = [
+  '  listening ports        netstat -ano                          (parse the LISTENING rows)',
+  '  processes              Get-Process',
+  '  services               Get-Service',
+  '  free disk space        [System.IO.DriveInfo]::new(\'C\').AvailableFreeSpace',
+  '  memory                 Get-Counter \'\\Memory\\Available MBytes\'',
+  '  OS version             registry: HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion',
+] as const
+
+/**
+ * Build the advisory for the CIM/WMI boundary of a restricted-token sandbox.
+ *
+ * Four things this text is responsible for, in the order a reader needs them:
+ * identify the code and say the command was not at fault; quote upstream's own
+ * sentence as the mechanism instead of presenting it as a discovery; name the two
+ * shapes that produce a wrong answer with **no error at all**, because those are
+ * the ones an agent will act on; and hand over the measured substitutes plus the
+ * gaps, which is the part the documentation upstream does not supply.
+ *
+ * What it deliberately does not do: hand over a repair. No ACE closes this, no
+ * elevation reaches it, and the one narrow repair a reader reaches for — read
+ * access to `root/cimv2` — is a change to the token's own list, priced against
+ * the escape that removing Authenticated Users from that list closes. None of
+ * that is this plugin's to decide, so it says what upstream documented and what
+ * nobody has measured.
+ * @param failure - the recognized failure.
+ * @param mode - the resolved sandbox mode the failing call ran under.
+ * @param href - optional URL shown for the upstream threads.
+ * @returns the user-role notice text.
+ */
+function cimWmiAdvisory(failure: CimDenialFailure, mode: SandboxModeName, href?: string): string {
+  const where = href === undefined
+    ? `tracked upstream (discussions ${CIM_WMI_DISCUSSIONS})`
+    : `tracked upstream: ${href}`
+  return [
+    'CIM/WMI is unavailable in this session — every WMI query, and every cmdlet built on one, is refused.',
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}`,
+    `The call ran under sandbox mode \`${mode}\`, where the harness starts every command through its`,
+    'restricted-token runner.',
+    '',
+    'The command is not at fault and the query is not malformed. 0x80041003 is WBEM_E_ACCESS_DENIED, the',
+    'status the WMI namespace security check returns to a token whose restricted list does not carry the',
+    'SIDs that check wants. The sentence beside the code is localized — "Access denied", "拒绝访问", and so',
+    'on — while the code is not, which is why the code is what identifies this.',
+    '',
+    'This boundary is DOCUMENTED by the harness, and here is its own statement of it:',
+    '  "' + CIM_DOCUMENTED_LIMIT + '"',
+    'It holds under BOTH confining modes — `read-only` carries no write SIDs, so the namespace fails either',
+    'way; `danger-full-access` is not a mode this happens under, because nothing is spawned through the',
+    'sandbox there at all. Passing under `danger-full-access` confirms the diagnosis and does not fix it.',
+    '',
+    'Do not retry this call: the environment has not changed, and the identical call is refused identically.',
+    '',
+    'TWO TRAPS — these return a WRONG ANSWER with NO ERROR AT ALL, which is the part that matters for an',
+    'automation or an agent:',
+    '  1. `-ErrorAction SilentlyContinue` (or a script that sets `$ErrorActionPreference =\'SilentlyContinue\'`)',
+    '     turns every refusal on this page into an EMPTY RESULT. Measured:',
+    '       (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue).Count   ->  0',
+    '     A caller reads that as "nothing is listening" when the query never ran. In this session, never',
+    '     treat a CIM-derived empty result, zero or missing value as evidence of absence.',
+    '  2. `Get-PSDrive -PSProvider FileSystem` raises no error at all and reports Used/Free as `0` for EVERY',
+    '     drive, because PowerShell 5.1 fills those columns from a WMI query — while',
+    '     `[System.IO.DriveInfo]::new(\'C\').AvailableFreeSpace` is correct at the same moment. Never read',
+    '     free space from `Get-PSDrive` here: "0 bytes free" is a value an agent will act on.',
+    '',
+    'WHAT STILL WORKS — every line below was measured on the same machine, in the same session, as the',
+    'refusals above:',
+    ...CIM_SUBSTITUTES,
+    'None of these goes through WMI, so all of them work at full fidelity under this mode.',
+    '',
+    'TWO COMMANDS IN THAT FAMILY HAVE NO MEASURED SUBSTITUTE, and the gap is stated rather than filled:',
+    '  Get-NetIPAddress / Get-NetAdapter — the report supplies no native replacement for either, and',
+    '  `ipconfig /all` is a plausible candidate that was NOT measured under a confining mode. Do not hand',
+    '  a substitute over as verified when it is not: say the query is unavailable in this session and, if',
+    '  the fact is needed, ask the user for it.',
+    '',
+    'WHAT IS NOT THE FIX:',
+    '  - No `icacls` line and no elevation. This refusal names no path and is not about a file, so no ACE',
+    '    closes it — the rights the property tools speak in do not reach a namespace.',
+    '  - `danger-full-access` is not a fix: it removes the sandbox, and with it the reason this session was',
+    '    confined. It only confirms the diagnosis.',
+    '  - The narrow repair a reader naturally proposes — admitting read-only access to the `root/cimv2`',
+    '    namespace — is a change to the restricted token\'s own lists rather than to anything on disk, and it',
+    '    is the other side of a trade the backend made deliberately: the same absence of Authenticated Users',
+    '    from those lists is listed as what closes the C:\\-root tree-creation escape. No one has measured',
+    '    which of the token\'s checks refuses the namespace, so this advisory cannot price a narrower',
+    '    allowance, and it does not pretend to.',
+    '',
+    'Honest boundary — this is recognized only on Windows, only under a confining mode, and only from a',
+    'shell call\'s own settled value (a cmdlet error is a nonzero exit, which the shipped shell tools report',
+    'without marking the result an error, so it never reaches `error.message`). The read is the captured',
+    'stderr of that value, not assembled text, which is what keeps a command that merely prints a quoted',
+    'copy of such a record from being read as this. The family covers the CIM/WMI face of the restricted',
+    'token only: the same boundary also refuses outbound network, TLS and some process creation, and those',
+    'are separate diagnoses with their own remedies.',
+    '',
+    'This is a stopgap, ' + where + '. What it is NOT: this plugin neither grants anything nor widens the',
+    'sandbox — the substitutes above are yours to run, and your file tools are unaffected.',
   ].join('\n')
 }
 

@@ -2,7 +2,7 @@
  * `sandbox-grant-advisor`: turn an environment failure that has no path forward
  * into a diagnosis the model — and the user reading the transcript — can act on.
  *
- * ## The five failures it recognizes
+ * ## The six failures it recognizes
  *
  * **Workspace provisioning (Windows ACL).** Four reports of one signature
  * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
@@ -170,7 +170,13 @@
  *    names which of the two carriers refused, and hands the environment change
  *    (`%TMP%` / `%TEMP%`, or a workspace that does not contain the temp root) to
  *    the user, with no grant command anywhere in it: nothing was denied, so there
- *    is nothing to grant. All five ride `additionalContexts`, so the
+ *    is nothing to grant. For the CIM/WMI family it names the code and the
+ *    resolved mode, quotes the backend's own README as the mechanism rather than
+ *    claiming it, hands over the measured native substitute for every command the
+ *    report measured one for, says plainly which two commands have none, and
+ *    states the two silent shapes — an empty CIM result and `Get-PSDrive`'s zero
+ *    columns — as rules, because neither raises an error and an agent will act on
+ *    either. All six ride `additionalContexts`, so the
  *    model sees the diagnosis beside the failure rather than only in a log it
  *    never reads.
  * 2. **A bounded fail-fast, ACL family only.** With `enforceAfter` set, a call
@@ -236,7 +242,7 @@
  *   guard keys on *call identity* (identical arguments retried); this one keys
  *   on the *environment signature*, which is how several different commands can
  *   share one cause. They can be mounted together.
- * - **The real fix is upstream**, in all five families: the ACL failure should
+ * - **The real fix is upstream**, in all six families: the ACL failure should
  *   name
  *   the outstanding condition at the site that knows it (`grantWrite` computes
  *   `hasExactGrant`/`hasExactDeny`/`hasExactLabel` and discards which was
@@ -256,6 +262,36 @@
  *   chose, while the temp root is `GetTempPathW`'s answer) and how. This plugin
  *   is the stopgap.
  *
+ * **The CIM/WMI boundary of the restricted token (`cim-wmi-denial`, `#9272`).**
+ * The sixth family is the only one whose mechanism the harness **already
+ * documents**: under a confining mode every WMI query and every cmdlet built on
+ * one is refused with `WBEM_E_ACCESS_DENIED` (`0x80041003`), because the
+ * restricted token's lists do not carry the SIDs the WMI namespace security
+ * check wants — the Windows ACL package's README says so, its token builder
+ * repeats it, and two arms of its runner suite pin it. The plugin carries the
+ * family anyway for the reason the ACL family carries a documented
+ * prerequisite: the *error* does not name it, and the moment the diagnosis is
+ * needed is the moment a CIM command has just failed for no visible reason.
+ * What the advisory adds is what the report asked for first and the
+ * documentation does not supply — a measured **native substitute** for each
+ * command that stops working (`netstat -ano`, `Get-Process`, `Get-Service`,
+ * `[System.IO.DriveInfo]`, `Get-Counter`, the registry, with the two commands
+ * that have no measured replacement named as such) — plus the two shapes that
+ * answer with a **wrong value and no error at all**: `Get-PSDrive`'s usage
+ * columns silently falling back to `0`, and every CIM call under
+ * `-ErrorAction SilentlyContinue` returning an empty result, which an agent
+ * reads as "nothing is listening" when the query never ran. Read from the
+ * canonical value of a **successful** result, in that value's own `stderr` — the
+ * same seam as the native-init family, because a cmdlet error is a nonzero exit
+ * and the renderer reports those without erroring. Like the other Windows-only
+ * value-read family it is gated on the platform and on the resolved mode, and it
+ * names no repair: no ACE closes it, no elevation reaches it, and the one narrow
+ * allowance a reader proposes is a change to the token's own lists, priced by
+ * nobody — the same absence of Authenticated Users that refuses the namespace is
+ * listed upstream as what closes the `C:\`-root tree-creation escape. The
+ * advisory quotes upstream's sentence as the authority and says what it adds,
+ * rather than presenting a documented boundary as a discovery.
+ *
  * @module @argszero/cordis-plugin-sandbox-grant-advisor
  */
 
@@ -265,17 +301,20 @@ import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { tmpdir } from 'node:os'
-import { advisoryText, ACL_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, tempRootPreflightAdvisory, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
+import { advisoryText, ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, tempRootPreflightAdvisory, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
 import type { AdvisoryContext } from './advice.js'
 import {
+  classifyCimDenial,
   classifyNativeInitDeath,
   classifyProvisioningFailure,
   classifyPtyStartupFailure,
   classifyTempRootRefusal,
   classifyWorkspaceDenial,
+  hasCimDenialShape,
   hasWorkspaceDenialStamp,
 } from './signature.js'
 import type {
+  CimDenialFailure,
   FailureFamily,
   NativeInitFailure,
   ProvisioningFailure,
@@ -467,6 +506,25 @@ function tempRootPreflightHostLine(workspaceRoot: string, tempRoot: string): str
 }
 
 /**
+ * The one-line host-side account of the CIM/WMI boundary.
+ *
+ * It carries the mode and the code and no verdict about the query, for the reason
+ * the family's own text gives: the condition is a property of the class of
+ * commands under this token, so a log line that named a cmdlet would read as if
+ * that query were the problem.
+ * @param failure - the recognized failure.
+ * @param mode - the resolved sandbox mode the failing call ran under.
+ * @returns a single log line.
+ */
+function cimDenialHostLine(failure: CimDenialFailure, mode: SandboxModeName): string {
+  const status = failure.exitCode === null ? '' : `exit ${String(failure.exitCode)}, `
+  return `sandbox-grant-advisor: a command reported ${status}WBEM_E_ACCESS_DENIED (0x80041003) in its own `
+    + `stderr under sandbox mode "${mode}" — CIM/WMI is unavailable to this token in every confining mode `
+    + `(the backend's own documented boundary), and the commands that stop working have measured native `
+    + `substitutes; advisory delivered to the model (discussions ${CIM_WMI_DISCUSSIONS})`
+}
+
+/**
  * Wrap one notice as a user-role message.
  *
  * The double cast encodes a documented fact the installed type cannot express:
@@ -514,6 +572,9 @@ function summaryOf(failure: RecognizedFailure, mode?: SandboxModeName): string {
   if (failure.family === 'temp-root-inside-workspace') {
     const carrier = failure.carrier === 'runner' ? 'the runner' : 'the provider'
     return `sandbox temp root lies inside the workspace — refused by ${carrier}`
+  }
+  if (failure.family === 'cim-wmi-denial') {
+    return `CIM/WMI unavailable to the sandbox token (0x80041003) under sandbox mode "${String(mode)}"`
   }
   return `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
 }
@@ -641,7 +702,7 @@ export function apply(ctx: Context, config: Config = {}): void {
    * told — the failure it just hit, or the standing condition this session is
    * already in.
    *
-   * The order is not arbitrary. A call that really is one of the five failures
+   * The order is not arbitrary. A call that really is one of the six failures
    * carries the producer's own line, which the pre-flight report cannot have, so
    * the failures are asked first and the standing check speaks only on a call
    * that produced no diagnosis at all. In a session the standing condition is
@@ -666,7 +727,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   /**
-   * Classify one settled call against the five failure families.
+   * Classify one settled call against the six failure families.
    *
    * Everything here is driven by the settled result, and every branch that
    * recognizes one of them claims the family's once-per-agent advisory for this
@@ -693,6 +754,15 @@ export function apply(ctx: Context, config: Config = {}): void {
       // whose own output mentions the code cannot be mistaken for it.
       const death = classifyNativeInitDeath(result.value)
       if (death !== undefined) return adviseGated(agent, previous, death, key, exec.name)
+      // The CIM/WMI boundary is the third value-read family, and it is read only
+      // when the host is Windows for the same reason the workspace denial is: the
+      // condition is a property of the ACL backend's restricted token, so on any
+      // other platform the same text is a different story and is refused rather
+      // than guessed at. The platform test comes first so a non-Windows host never
+      // pays for the text scan.
+      if (process.platform === 'win32' && hasCimDenialShape(result.value)) {
+        return adviseCimDenial(agent, previous, result.value, key, exec.name)
+      }
       // The workspace-denial family is the other value-read one, and it is read
       // only when the host is Windows: the mechanism it explains is ACE
       // inheritance, which no other backend has, so on macOS/Linux the same
@@ -820,6 +890,46 @@ export function apply(ctx: Context, config: Config = {}): void {
     }
     if (!claimAdvice(agent, previous, failure, key)) return undefined
     ctx.logger.warn(failure.family === 'pty-startup' ? ptyHostLine(mode) : nativeInitHostLine(failure, mode))
+    return notice(advisoryText(failure, advisoryContext(tool, mode)), summaryOf(failure, mode))
+  }
+
+  /**
+   * Diagnose one CIM/WMI refusal read off a **successful** call's own value.
+   *
+   * The mode is resolved here rather than in the classifier for the reason the two
+   * gated families give: the condition holds under both confining modes, so the
+   * text has to name the one this call actually ran under, and a mode that cannot
+   * be resolved withholds the advisory rather than falling back to the deployment
+   * default. A non-confining mode is withheld too, and the wording is the
+   * family's own rather than the shared one: `danger-full-access` does not stop
+   * commands from being spawned through the sandbox — it stops the sandbox from
+   * existing, which is why CIM works there and why the refusal above cannot be
+   * this story.
+   * @param agent - the agent whose call was refused.
+   * @param previous - the agent's state before this call, if any.
+   * @param value - the settled call's canonical value.
+   * @param key - the identity of the refused call.
+   * @param tool - the refused tool's name, for the advisory context.
+   * @returns the notice to attach, or undefined.
+   */
+  function adviseCimDenial(
+    agent: Agent,
+    previous: AgentState | undefined,
+    value: unknown,
+    key: string,
+    tool: string,
+  ): UserMessage | undefined {
+    const resolution = resolveSandboxMode(ctx, agent)
+    if (!resolution.ok) return withhold(agent, previous, resolution.withheld, 'cim-wmi-denial')
+    const mode = resolution.mode
+    if (!confines(mode)) {
+      return withhold(agent, previous, `the call ran under \`${mode}\`, where nothing is spawned through the `
+        + 'sandbox at all, so the WMI namespace is reached with the caller\'s own token', 'cim-wmi-denial')
+    }
+    const failure = classifyCimDenial(value, { platform: process.platform })
+    if (failure === undefined) return undefined
+    if (!claimAdvice(agent, previous, failure, key)) return undefined
+    ctx.logger.warn(cimDenialHostLine(failure, mode))
     return notice(advisoryText(failure, advisoryContext(tool, mode)), summaryOf(failure, mode))
   }
 

@@ -712,6 +712,175 @@ const MUTATIONS = [
     arms: 'packaging.spec.mjs',
     edits: [['# A FIFTH family is a pre-spawn refusal with no ACL in it at all (#9175): the', '# A FIFTH family is a pre-spawn refusal with no ACL in it at all: the']],
   },
+  {
+    // The platform gate is the family's whole applicability: the condition is a
+    // property of the Windows ACL backend's restricted token, so a gate that
+    // admits every host tells a macOS session its CIM is unavailable.
+    name: 'the CIM platform gate is inverted, so every host is told its CIM is refused',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [[
+      "export function classifyCimDenial(value: unknown, facts: CimDenialFacts): CimDenialFailure | undefined {\n  if (facts.platform !== 'win32') return undefined",
+      "export function classifyCimDenial(value: unknown, facts: CimDenialFacts): CimDenialFailure | undefined {\n  if (facts.platform === 'win32') return undefined",
+    ]],
+  },
+  {
+    // The code alone is not the signature: a command whose own output quotes the
+    // status (a log being grepped, a transcript being printed) must not make the
+    // plugin diagnose a working environment. Dropping the marker guard is exactly
+    // that mistake.
+    name: 'the CIM context marker guard is dropped, so a quoted code is read as a refused query',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['return CIM_CONTEXT_MARKERS.some(marker => haystack.includes(marker))', 'return true']],
+  },
+  {
+    // The discriminator is the code because the sentence beside it is localized.
+    // Keying on the English words instead is the defect the reporter's own log
+    // (拒绝访问) exposes — and it is the reason this arm exists at all.
+    name: 'the CIM discriminator reads the localized sentence instead of the status code',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['if (!haystack.includes(WBEM_ACCESS_DENIED_TOKEN)) return false', "if (!haystack.includes('access is denied')) return false"]],
+  },
+  {
+    // A cmdlet error goes to PowerShell's error stream; a command that merely
+    // prints such a record on its normal output has not been refused. Reading
+    // stdout would make the second look like the first.
+    name: 'the CIM read is taken from stdout, so a printed record reads as a refusal',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [
+      ['const probe = value as { kind?: unknown, stderr?: unknown }', 'const probe = value as { kind?: unknown, stdout?: unknown }'],
+      ['const stderr = probe.stderr', 'const stderr = probe.stdout'],
+    ],
+  },
+  {
+    // The value carries the status it really had; a missing one is null, not a
+    // convenient number. Inventing `0` would state an exit status nobody measured.
+    name: 'a CIM refusal with no reported exit status is given an invented one',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['  const probe = value as { exitCode?: unknown }\n  const exitCode = typeof probe.exitCode === \'number\' && Number.isInteger(probe.exitCode) ? probe.exitCode : null', '  const probe = value as { exitCode?: unknown }\n  const exitCode = typeof probe.exitCode === \'number\' ? probe.exitCode : 0']],
+  },
+  {
+    // The read is the shipped shell tools' own projection; another tool's value
+    // that happens to carry a stderr field must not be read as a refused query.
+    name: 'the CIM shape test accepts any object, not only the shell tools\' own projection',
+    file: 'src/signature.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [[
+      'export function hasCimDenialShape(value: unknown): boolean {\n  if (value === null || typeof value !== \'object\' || Array.isArray(value)) return false\n  const probe = value as { kind?: unknown, stderr?: unknown }\n  if (probe.kind !== FOREGROUND) return false',
+      'export function hasCimDenialShape(value: unknown): boolean {\n  if (value === null || typeof value !== \'object\' || Array.isArray(value)) return false\n  const probe = value as { kind?: unknown, stderr?: unknown }',
+    ]],
+  },
+  {
+    // `danger-full-access` is not a mode where commands are unsandboxed — it is a
+    // mode where the sandbox does not exist — so this refusal cannot happen under
+    // it. Dropping the gate advises a session that could not have this failure.
+    name: 'the CIM confining-mode gate is dropped, so a non-confining session is advised',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['    if (!confines(mode)) {\n      return withhold(agent, previous, `the call ran under \\`${mode}\\`', '    if (false) {\n      return withhold(agent, previous, `the call ran under \\`${mode}\\`']],
+  },
+  {
+    // The withholding note names the family it withheld; naming another family
+    // makes the host log account for the wrong silence, which is how a
+    // misattributed advisory hides.
+    name: 'the CIM withholding is booked against another family',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [["return withhold(agent, previous, resolution.withheld, 'cim-wmi-denial')", "return withhold(agent, previous, resolution.withheld, 'acl-provisioning')"]],
+  },
+  {
+    // The platform fact is read before the policy lookup; moving the check after
+    // it costs every non-Windows host a sandbox-policy resolution to answer a
+    // question whose answer is already known.
+    name: 'the CIM platform fact is checked after the policy lookup, so every host pays for it',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['if (process.platform === \'win32\' && hasCimDenialShape(result.value)) {', 'if (hasCimDenialShape(result.value)) {']],
+  },
+  {
+    // The substitutes are the part the documentation does not supply, and each
+    // pair is a measurement. Dropping one leaves the reader with the failing
+    // command and no replacement — the shape the family exists to remove.
+    name: 'the CIM substitute table loses a measured pair',
+    file: 'src/advice.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [["  '  listening ports        netstat -ano                          (parse the LISTENING rows)',\n", '']],
+  },
+  {
+    // Filling a gap the report never measured is the one thing this table must not
+    // do: `ipconfig /all` was never measured under a confining mode, so promoting
+    // it to a substitute hands over a command that may fail exactly as the one it
+    // replaces.
+    name: 'the CIM advisory promotes an unmeasured candidate to a verified substitute',
+    file: 'src/advice.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [["'  `ipconfig /all` is a plausible candidate that was NOT measured under a confining mode. Do not hand',", "'  `ipconfig /all` is the substitute to use. Do not hand',"]],
+  },
+  {
+    // The mechanism is upstream's sentence, and quoting it is what keeps the
+    // advisory honest about what it adds. Replacing the sentence with a different
+    // claim turns a documented boundary into a discovery this plugin did not make.
+    name: 'the CIM advisory stops quoting the documented mechanism',
+    file: 'src/advice.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [
+      ["'Authenticated Users is absent from both lists — the WMI namespace security check '", "'Authenticated Users is absent from both lists — the WMI access check '"],
+      ["'status the WMI namespace security check returns to a token whose restricted list does not carry the',", "'status the WMI access check returns to a token whose restricted list does not carry the',"],
+    ],
+  },
+  {
+    // The silent half is the half that matters: neither shape raises anything, so
+    // an agent will act on the wrong value. Dropping the rule leaves the reader
+    // with a diagnosis for the loud case only.
+    name: 'the CIM advisory drops the silent wrong-value rule',
+    file: 'src/advice.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [
+      ["'  2. `Get-PSDrive -PSProvider FileSystem` raises no error at all and reports Used/Free as `0` for EVERY',", "'  2. the usage columns raise no error at all and report Used/Free as `0` for EVERY',"],
+      ["'     free space from `Get-PSDrive` here: \"0 bytes free\" is a value an agent will act on.',", "'     free space from the drive listing here: \"0 bytes free\" is a value an agent will act on.',"],
+    ],
+  },
+  {
+    // The transcript row names the mode so the two halves of "both confining
+    // modes" claim stay auditable; a summary that states no mode is a claim the
+    // reader cannot check against the call.
+    name: 'the CIM notice row stops naming the resolved mode',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['return `CIM/WMI unavailable to the sandbox token (0x80041003) under sandbox mode "${String(mode)}"`', 'return \'CIM/WMI unavailable to the sandbox token (0x80041003) in this session\'']],
+  },
+  {
+    // The host log is the only place the recognition is accounted for outside the
+    // conversation, and the code is what makes the line traceable to the report.
+    name: 'the CIM host line loses the status code',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [['WBEM_E_ACCESS_DENIED (0x80041003) in its own ', 'WBEM_E_ACCESS_DENIED in its own ']],
+  },
+  {
+    // One advisory per agent, not one per refused query: without the claim every
+    // CIM-backed command in the session re-delivers the same page.
+    name: 'the CIM family claims no advice, so every refused query re-delivers the page',
+    file: 'src/index.ts',
+    arms: 'cim-wmi.spec.mjs',
+    edits: [[
+      '    const failure = classifyCimDenial(value, { platform: process.platform })\n    if (failure === undefined) return undefined\n    if (!claimAdvice(agent, previous, failure, key)) return undefined',
+      '    const failure = classifyCimDenial(value, { platform: process.platform })\n    if (failure === undefined) return undefined',
+    ]],
+  },
+  {
+    // The mount instructions are published prose with no compiler over them, and
+    // the sixth family's substitute table is the half the documentation does not
+    // supply.
+    name: 'the mount instructions drop the sixth family\'s measured substitute',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [['measurements on one machine: `netstat -ano`', 'measurements on one machine: `netstat`']],
+  },
 ]
 
 let silent = 0

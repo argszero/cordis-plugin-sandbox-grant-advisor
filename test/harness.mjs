@@ -38,7 +38,17 @@ export const PTY_EXIT = 'PTY shell exited during startup'
 
 // The native-init family's producer shape lives in its own module, so the pure
 // arms can pin it without mounting this harness.
-export { NATIVE_DEATH, MSYS2_STDERR, foreground, denied, WORKSPACE_ROOT, INSIDE, OUTSIDE } from './foreground.mjs'
+export {
+  NATIVE_DEATH,
+  MSYS2_STDERR,
+  foreground,
+  denied,
+  CIM_DENIED_STDERR,
+  cimDenied,
+  WORKSPACE_ROOT,
+  INSIDE,
+  OUTSIDE,
+} from './foreground.mjs'
 
 // Imported as well as re-exported: the policy stand-in below answers with the
 // root, and an `export … from` does not put a binding in this module's scope.

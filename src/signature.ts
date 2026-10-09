@@ -1,5 +1,5 @@
 /**
- * Recognize the five environment failures this plugin explains, and refuse
+ * Recognize the six environment failures this plugin explains, and refuse
  * everything else.
  *
  * ## The ACL provisioning failure (`acl-provisioning`)
@@ -293,6 +293,50 @@
  * line and could refuse a genuine report; the producer's own sentence is the
  * recognition, exactly as the ACL family's `Win32` line is.
  *
+ * ## The CIM/WMI boundary under a restricted token (`cim-wmi-denial`, `#9272`)
+ *
+ * Inside a confining Windows mode **all** CIM/WMI access fails with
+ * `WBEM_E_ACCESS_DENIED` (`0x80041003`): `Get-CimInstance` for any class, and
+ * every CIM-backed cmdlet built on it — `Get-NetTCPConnection`, `Get-NetIPAddress`,
+ * `Get-NetAdapter`, `Get-Volume`, `Get-ComputerInfo`. The reader sees an error
+ * that names neither the sandbox nor a path forward, which is what puts it in
+ * this module's remit, and the failure is **not** an infrastructure failure: it
+ * is a cmdlet error inside a command that ran, so it arrives as the canonical
+ * value of a result the pipeline calls a success and lives in that value's own
+ * `stderr` — never in `error.message`, which is why it is a value-read family
+ * like `native-init` and `workspace-denial`.
+ *
+ * **The mechanism is documented upstream, and that is a fact the advisory states
+ * rather than conceals.** `packages/sandbox/sandbox-windows-acl/README.md` names
+ * it — "Authenticated Users is absent from both lists — the WMI namespace
+ * security check fails (`0x80041003`), so CIM cmdlets and `Get-ComputerInfo` are
+ * unavailable in every confined mode" — the same sentence is in the token
+ * builder's own doc comment, and two arms of `tests/runner.spec.ts` pin
+ * `CIM: DENIED` under both confined modes. Carrying the family anyway is the
+ * posture the ACL family already takes with `PREREQUISITE`: that failure's
+ * right is documented too, and the reason it is still advised is that the
+ * *error* does not name it. What upstream does not supply is what the reporter
+ * asked for first — the **native substitutes** for the commands that stop
+ * working — and the two shapes in which this boundary produces **no error at
+ * all** while returning a wrong answer. Those are what the advisory adds.
+ *
+ * The recognition is the code plus a context marker, never a localized word:
+ * `0x80041003` is what the error record's `FullyQualifiedErrorId` carries
+ * verbatim in every display language, while the sentence next to it ("Access is
+ * denied") does not, so the code is the discriminator and the marker is the
+ * guard that a command merely *quoting* the code in its own stderr is left
+ * alone. The gate is the platform and the mode, both taken from outside: the
+ * condition is a property of this backend's restricted token, so a session that
+ * is not confined at all is not this story and is withheld rather than guessed
+ * at.
+ *
+ * What the family does **not** claim is the mechanism of the denial itself.
+ * Whether the namespace check fails on the restricted token's second access
+ * pass, on its mandatory label, or on the namespace's own mask was not measured
+ * by anyone, so the advisory quotes upstream's sentence as the documented
+ * reason, and separately says that pricing a narrower fix is beyond what this
+ * plugin can support from its own evidence.
+ *
  * @module
  */
 
@@ -327,6 +371,8 @@ export type FailureFamily =
   | 'workspace-denial'
   /** The sandbox's private temp root lies inside the workspace it is granted against. */
   | 'temp-root-inside-workspace'
+  /** CIM/WMI was refused to a confined Windows command's restricted token. */
+  | 'cim-wmi-denial'
 
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
@@ -449,6 +495,7 @@ export type RecognizedFailure =
   | NativeInitFailure
   | WorkspaceDenialFailure
   | TempRootFailure
+  | CimDenialFailure
 
 /**
  * The assertion's own words, kept as a constant so nothing can drift.
@@ -501,6 +548,73 @@ export interface TempRootFailure {
   readonly workspaceRoot: string
   /** The temp root, as the producer printed it. */
   readonly tempRoot: string
+}
+
+/**
+ * `WBEM_E_ACCESS_DENIED`, the status the WMI namespace security check returns.
+ *
+ * The sentence beside it is localized — the reporter's own log reads "拒绝访问"
+ * where an English install reads "Access denied" — while this number is not: it
+ * is carried verbatim in the error record's `FullyQualifiedErrorId`, which is
+ * why it and not the words is the discriminator.
+ */
+export const WBEM_ACCESS_DENIED = 0x80041003
+
+/**
+ * The status as the error record spells it, lowercase hex and `0x`-prefixed.
+ *
+ * Kept as the rendered token rather than re-derived from the number so that the
+ * day the rendering changes, this is the one line to change — the comparison is
+ * against the producer's own text, not against a format this module believes in.
+ */
+export const WBEM_ACCESS_DENIED_TOKEN = '0x80041003'
+
+/**
+ * The non-localized context markers a CIM denial's error record carries.
+ *
+ * At least one must appear in the same stderr as the code, and the list is the
+ * guard the module applies to every signature that is not self-identifying: a
+ * command whose own output merely *quotes* `0x80041003` (a log file being
+ * grepped, an error transcript being printed) must not be read as this failure.
+ * Each marker is a name the product itself uses — the error-record field, the
+ * symbolic constant, the .NET exception and cmdlet types, and the namespace path
+ * the `CategoryInfo` line prints — none of which is translated on a localized
+ * install. Compared against lowercased text.
+ */
+export const CIM_CONTEXT_MARKERS = [
+  `hresult ${WBEM_ACCESS_DENIED_TOKEN}`,
+  'wbem_e_access_denied',
+  'cimexception',
+  'cimcmdlets',
+  'cimv2',
+] as const
+
+/**
+ * The facts the CIM/WMI recognition needs beyond the settled value.
+ *
+ * Passed in rather than read here, for the reason {@link WorkspaceDenialFacts}
+ * states: the condition belongs to one backend's restricted token, so the gate
+ * must be a fact the caller measured and not a platform this module assumes.
+ */
+export interface CimDenialFacts {
+  /** The host's `process.platform`, as the caller read it. */
+  readonly platform: string
+}
+
+/**
+ * A confined Windows command whose CIM/WMI access was refused.
+ *
+ * There is no cmdlet name and no class name here, and that is a decision rather
+ * than an omission: the condition is a property of the CLASS of commands, so a
+ * field naming one of them would invite an advisory that reads as if a specific
+ * query were the problem. Only the exit status is kept, so the advisory can quote
+ * the same status marker the model is looking at.
+ */
+export interface CimDenialFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'cim-wmi-denial'
+  /** The command's exit status, or `null` when the tool reported none. */
+  readonly exitCode: number | null
 }
 
 /**
@@ -630,6 +744,14 @@ export function failureLine(failure: RecognizedFailure): string {
   if (failure.family === 'workspace-denial') {
     const status = failure.exitCode === null ? '' : `[exit code: ${String(failure.exitCode)}] `
     return `${status}sandbox: { mode: "${failure.mode}", denied: true }`
+  }
+  if (failure.family === 'cim-wmi-denial') {
+    // Not a producer quote but a statement of what was read, because the
+    // producer's own line is PowerShell's formatted error record — several
+    // localized lines the model already has in front of it. What this family
+    // adds is the identification of the code, so that is what is printed.
+    const status = failure.exitCode === null ? '' : `[exit code: ${String(failure.exitCode)}] `
+    return `${status}WBEM_E_ACCESS_DENIED (${WBEM_ACCESS_DENIED_TOKEN}) in the command's own stderr`
   }
   const suffix = failure.detail.length === 0 ? '' : `: ${failure.detail}`
   return `${failure.api} failed (Win32 ${failure.win32Code})${suffix}`
@@ -775,4 +897,62 @@ export function classifyTempRootRefusal(message: string): TempRootFailure | unde
   const line = message.split(/\r?\n/).find(candidate => candidate.includes(TEMP_ROOT_ASSERTION)) ?? ''
   const carrier: TempRootCarrier = line.includes(RUNNER_SIGNATURE) ? 'runner' : 'pre-spawn'
   return { family: 'temp-root-inside-workspace', carrier, workspaceRoot, tempRoot }
+}
+
+/**
+ * Whether one settled value carries the shape of a CIM/WMI denial.
+ *
+ * The **structural half** of the sixth family's recognition, split out for the
+ * reason {@link hasWorkspaceDenialStamp} is: "this is not that failure at all"
+ * (silent, and the overwhelming majority of successful calls) has to stay
+ * distinguishable from "this looks like one and the plugin could not finish
+ * placing it", which the disclosure rule requires the host log to account for.
+ *
+ * Three facts, and the third is the one that keeps the family honest: the value
+ * is the shipped shell tools' foreground projection; its `stderr.text` carries
+ * {@link WBEM_ACCESS_DENIED_TOKEN}; and that same stderr carries at least one of
+ * {@link CIM_CONTEXT_MARKERS}. The code alone would also match a command whose
+ * own error output quotes it — a log line being grep-printed, an error record
+ * being re-raised — and this module's rule is that a signature quoted from a log
+ * must never make the plugin diagnose a working environment.
+ *
+ * Read from `stderr` and not from `stdout` on purpose: a cmdlet error goes to
+ * PowerShell's error stream, which is what the executors capture there, so a
+ * command that merely *prints* such a record on its normal output is left alone
+ * by construction rather than by a heuristic.
+ * @param value - a settled execution's canonical value.
+ * @returns true when the value is a foreground shell projection whose stderr
+ *   carries the WMI access-denied status beside a CIM context marker.
+ */
+export function hasCimDenialShape(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
+  const probe = value as { kind?: unknown, stderr?: unknown }
+  if (probe.kind !== FOREGROUND) return false
+  const stderr = probe.stderr
+  if (stderr === null || typeof stderr !== 'object') return false
+  const text = (stderr as { text?: unknown }).text
+  if (typeof text !== 'string' || text.length === 0) return false
+  const haystack = text.toLowerCase()
+  if (!haystack.includes(WBEM_ACCESS_DENIED_TOKEN)) return false
+  return CIM_CONTEXT_MARKERS.some(marker => haystack.includes(marker))
+}
+
+/**
+ * Classify one **successful** execution's canonical value as a CIM/WMI denial.
+ *
+ * The platform gate is an argument rather than a property of the value, and it
+ * comes first so a host this rule cannot apply to never reaches the text scan.
+ * The condition is a property of the Windows ACL backend's restricted token —
+ * no other backend has one — so on any other platform the same text is a
+ * different story and is refused rather than guessed at.
+ * @param value - the settled execution's canonical value (`ToolExecutionSuccess.value`).
+ * @param facts - the host platform, as the caller read it.
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyCimDenial(value: unknown, facts: CimDenialFacts): CimDenialFailure | undefined {
+  if (facts.platform !== 'win32') return undefined
+  if (!hasCimDenialShape(value)) return undefined
+  const probe = value as { exitCode?: unknown }
+  const exitCode = typeof probe.exitCode === 'number' && Number.isInteger(probe.exitCode) ? probe.exitCode : null
+  return { family: 'cim-wmi-denial', exitCode }
 }

@@ -1,7 +1,7 @@
 /**
- * The producer's side of the two value-read families — the native-init death and
- * the workspace-internal denial — shared by the pure arms and the integration
- * arms.
+ * The producer's side of the three value-read families — the native-init death,
+ * the workspace-internal denial, and the CIM/WMI refusal — shared by the pure
+ * arms and the integration arms.
  *
  * It lives in its own module so that `signature.spec.mjs` can pin the real shape
  * without importing the harness — which mounts a cordis context — and so that
@@ -54,6 +54,50 @@ export function foreground(exitCode, stderr = '') {
     stdout: { text: '', truncated: false },
     stderr: { text: stderr, truncated: false },
   }
+}
+
+/**
+ * The stderr `#9272` reports, as PowerShell renders a refused CIM query.
+ *
+ * Two halves, and the difference between them is the family's whole
+ * discriminator: the first line and the `CategoryInfo` label are **localized**
+ * (the reporter's install prints `拒绝访问`, an English one prints
+ * `Access denied`), while the `FullyQualifiedErrorId` line carries the status
+ * verbatim. The fixture keeps the reporter's own language rather than
+ * translating it, because a fixture that only ever used the English sentence
+ * would leave the reason the classifier keys on the code — and not on the words —
+ * untested.
+ *
+ * The record is the shape `pwsh -Command 'Get-CimInstance …'` produces on an
+ * unhandled cmdlet error: the message, the source line, the caret, the category,
+ * and the error id. A stderr line is the unit here, as it is for the MSYS2
+ * fixture above.
+ */
+export const CIM_DENIED_STDERR = [
+  'Get-CimInstance : 拒绝访问',
+  '所在位置 行:1 字符: 1',
+  '+ Get-CimInstance Win32_OperatingSystem',
+  '+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+  '    + CategoryInfo          : PermissionDenied: (root\\cimv2:Win32_OperatingSystem) [Get-CimInstance], CimException',
+  '    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand',
+].join('\n')
+
+/**
+ * The canonical foreground value of a refused CIM query.
+ *
+ * The exit status is `1` because that is what `pwsh -Command` returns for an
+ * unhandled cmdlet error — and the point of the family is that this status is
+ * reported rather than errored, so it reaches the session as the value of a
+ * successful call. The report does not quote the number, and nothing in the
+ * recognition reads it: the classifier keys on the stderr record, and the status
+ * is only quoted back. That is stated rather than left implicit, so the day a
+ * reader wonders whether `1` was measured, this is the answer.
+ * @param options - `exitCode` and `stderr`, both defaulted to the reported case.
+ * @returns a value the shipped shell tools would really have produced.
+ */
+export function cimDenied(options = {}) {
+  const { exitCode = 1, stderr = CIM_DENIED_STDERR } = options
+  return foreground(exitCode, stderr)
 }
 
 /**

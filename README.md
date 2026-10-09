@@ -1,7 +1,7 @@
 # @argszero/cordis-plugin-sandbox-grant-advisor
 
 Turns a sandbox environment failure that has **no path forward** into a
-diagnosis the model — and the user reading the transcript — can act on. Five
+diagnosis the model — and the user reading the transcript — can act on. Six
 signatures, one mechanism:
 
 ```
@@ -11,6 +11,7 @@ PTY shell exited during startup                             # persistent shell �
 [exit code: 1]  sandbox: { mode: "workspace-write", denied: true }
                                                             # denied INSIDE the workspace
 Windows ACL temp root must be outside the workspace: …      # the private temp root is inside the workspace
+0x80041003 (WBEM_E_ACCESS_DENIED) in the command's stderr   # CIM/WMI refused to the restricted token
 ```
 
 **This plugin is the stopgap for "the error does not name the outstanding
@@ -18,7 +19,7 @@ condition".** It repairs nothing: no ACL is written, no privilege is requested,
 nothing is elevated, no environment variable is set for another process, no
 preset is installed and no mode is changed.
 
-## The five failures it recognizes
+## The six failures it recognizes
 
 The first two are recognized on the public **`tools/post-execute`** waterfall
 (`@deepseek-ai/dsh-tools`) from the failure text. That seam is the one that has
@@ -27,11 +28,11 @@ all three of what a diagnosis needs: the failure
 `isError` result), an agent identity to attribute it to (`exec.agent`), and a
 channel that speaks to the model in the same step (`PostToolDecision`'s
 `additionalContexts`, which the agent loop turns into a durable user-role message
-— `packages/core/agent-loop/src/tool-calls.ts`). The third and fourth are
+— `packages/core/agent-loop/src/tool-calls.ts`). The third, fourth and sixth are
 recognized at the **same seam** from the canonical value of a result the pipeline
-calls a *success*, for reasons §3 and §4 give in full. The fifth is read from a
-thrown error's own message like the second, and is the one family the plugin also
-reports **before** anything fails, for reasons §5 gives in full.
+calls a *success*, for reasons §3, §4 and §6 give in full. The fifth is read from
+a thrown error's own message like the second, and is the one family the plugin
+also reports **before** anything fails, for reasons §5 gives in full.
 
 That seam, not `ctx.sandbox.confine`: `confine(argv, policy, signal)` sees the
 confinement failure too, but its signature carries no agent, so a wrapper could
@@ -964,6 +965,110 @@ which is the disclosure rule every other family keeps.
 [#9175] is a Discussion (the repository has issues disabled), and the reply
 covering this family is posted there.
 
+### 6. The CIM/WMI boundary of the restricted token (`cim-wmi-denial`, added in 0.17.0)
+
+[discussion #9272] reports a boundary rather than a bug: under a confining Windows
+mode **every WMI query, and every cmdlet built on one, is refused** with
+
+```
+Get-CimInstance : Access is denied
+    + CategoryInfo          : PermissionDenied: (root\cimv2:Win32_OperatingSystem) [Get-CimInstance], CimException
+    + FullyQualifiedErrorId : HRESULT 0x80041003,Microsoft.Management.Infrastructure.CimCmdlets.GetCimInstanceCommand
+```
+
+`0x80041003` is `WBEM_E_ACCESS_DENIED`, the status the WMI namespace security
+check returns; `Get-CimInstance` fails for any class and takes `Get-NetTCPConnection`,
+`Get-NetIPAddress`, `Get-NetAdapter`, `Get-Volume` and `Get-ComputerInfo` with it.
+
+**This family's mechanism is documented by the harness itself**, and that is a fact
+the advisory states rather than conceals: the Windows ACL backend's own README
+says *"Authenticated Users is absent from both lists — the WMI namespace security
+check fails (`0x80041003`), so CIM cmdlets and `Get-ComputerInfo` are unavailable
+in every confined mode"*, the token builder's doc comment repeats it, and two arms
+of that package's runner suite pin `CIM: DENIED` under both confining modes. The
+plugin carries the family anyway, for the reason the ACL family carries a
+documented prerequisite: **the error does not name it**, and the moment the
+diagnosis is needed is the moment a CIM command has just failed for no visible
+reason. So the advisory quotes upstream's sentence as the authority and says what
+it adds on top, instead of presenting a documented boundary as a discovery.
+
+**What it adds is the half the documentation does not supply.** First, a measured
+**native substitute** for each command that stops working — [discussion #9272]'s
+own measurements, taken in one session beside the refusals they replace:
+
+| stops working | use instead |
+|---|---|
+| `Get-NetTCPConnection -State Listen` | `netstat -ano` (parse the `LISTENING` rows) |
+| `Get-CimInstance Win32_LogicalDisk` (free space) | `[System.IO.DriveInfo]::new('C').AvailableFreeSpace` |
+| memory | `Get-Counter '\Memory\Available MBytes'` |
+| `Get-CimInstance Win32_OperatingSystem` (OS version) | registry: `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion` |
+| `Get-Process` / `Get-Service` | unaffected — neither goes through CIM, which is why they are listed here as the measured controls |
+
+Two commands in that family have **no measured substitute** — `Get-NetIPAddress`
+and `Get-NetAdapter` — and the advisory states that gap rather than filling it:
+`ipconfig /all` is a plausible candidate that was never measured under a confining
+mode, so it is named as a candidate and not handed over as verified.
+
+**And the half that matters most to an agent: two shapes that answer with a wrong
+value and no error at all.**
+
+1. `-ErrorAction SilentlyContinue` (or `$ErrorActionPreference = 'SilentlyContinue'`)
+   turns every refusal into an **empty result**:
+   `(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue).Count` → `0`.
+   A caller reads that as "nothing is listening" when the query never ran.
+2. `Get-PSDrive -PSProvider FileSystem` raises **no error at all** while reporting
+   `Used`/`Free` as `0` for every drive, because PowerShell 5.1 fills those columns
+   from a WMI query — while `[System.IO.DriveInfo]::new('C').AvailableFreeSpace` is
+   correct at the same moment. "0 bytes free" is a value an agent will act on.
+
+Neither shape leaves anything for a classifier to key on, which is why the plugin
+stays silent on them and delivers the **rule** inside the advisory attached to a
+recognized refusal. That is stated rather than left implicit, so a later reader
+does not mistake the silence for an oversight.
+
+**Why it is read from a successful result, like §3 and §4.** A refused cmdlet is a
+nonzero exit, and the shipped shell tools report those *without* marking the result
+an error (`packages/shell/tool-pwsh/src/render.ts`: "Non-zero exits are reported,
+not errored … only infrastructure failures (spawn errors, aborts) surface as
+`isError` results"). So the code lives in the settled value's own `stderr` and
+never in `error.message`, and a plugin reading only error results is structurally
+blind to it. The read is the value's captured `stderr` field rather than assembled
+text, so a command that merely *prints* such a record — a log being grepped, a
+transcript being re-raised — is left alone by construction.
+
+**The discriminator is the code, not the sentence**, because the sentence is
+localized: the reporter's own install prints `拒绝访问` where an English one prints
+"Access denied", while `0x80041003` is carried verbatim in the error record's
+`FullyQualifiedErrorId` in every display language. The code alone is not enough
+either — a quoted line must not make the plugin diagnose a working environment — so
+the same stderr must also carry one of the product's own untranslated names
+(`HRESULT 0x80041003`, `WBEM_E_ACCESS_DENIED`, `CimException`, `CimCmdlets`,
+`cimv2`).
+
+**It names no repair, and says why.** No `icacls` line and no elevation: this
+refusal names no path and is not about a file, so no ACE closes it. Passing under
+`danger-full-access` confirms the diagnosis and is not a fix — it removes the
+sandbox, and with it the reason the session was confined. And the one narrow
+allowance a reader naturally proposes — read access to the `root/cimv2` namespace
+— is a change to the restricted token's own lists rather than to anything on disk,
+priced against a deliberate trade: the same absence of Authenticated Users from
+those lists is what upstream lists as closing the `C:\`-root tree-creation escape.
+Nobody has measured *which* of the token's checks refuses the namespace (the
+second access pass, the mandatory label, or the namespace's own mask), so the
+advisory declines to price a narrower fix and says so.
+
+The family is gated on the platform and on the resolved mode, like §3 and §4: the
+condition is a property of one backend's restricted token, so a session on another
+host — or one whose mode does not confine — is not this story and is withheld
+rather than guessed at, with the host log accounting for the silence.
+
+[#9272] is a Discussion (the repository has issues disabled), and the reply
+covering this family is posted there, together with the four neighbours that make
+the boundary visible as one thing rather than four puzzles: [#1157] (no outbound
+network under the same restricted token), [#4163] and [#997] (Schannel TLS failing
+with `SEC_E_NO_CREDENTIALS`) and [#1847] (external processes dying with
+`0xC0000142`).
+
 ## What it does with a recognized failure
 
 1. **One durable advisory per agent, per family.** An agent that hits two
@@ -1099,12 +1204,14 @@ than one that stays silent.
 
 - **The Windows path itself cannot be witnessed on macOS**, where this plugin
   was built. What the test suite proves is the decision layer — classification
-  of all five families (the third from the producer's own canonical value,
+  of all six families (the third from the producer's own canonical value,
   built by the suite with the reported `-1073741502` and the report's stderr
   line; the fourth from the executors' own stamp, built by the suite with the
   mode, the `denied` flag and the refusal dialect the executor matches; the fifth
   from the producer's own sentence with both operands, in both carrier spellings,
-  plus the pre-flight containment computed on real directories), the
+  plus the pre-flight containment computed on real directories; the sixth from
+  the record #9272 pasted, in both display languages, with the silent shapes
+  asserted *not* to be recognized), the
   once-per-agent-per-family rule, the sandbox-mode gate
   and its fail-closed behaviour, the fail-fast budget and its self-feeding
   guard, and the wiring to a real cordis `Context` and the real `ToolRuntime` —
@@ -1124,6 +1231,12 @@ than one that stays silent.
   containment claim is exercised on **real** directories (a real ancestor of this
   host's `os.tmpdir()`), so the `realpathSync.native` comparison the backend
   performs is really performed here rather than simulated on strings.
+  The CIM/WMI family needs the stub too, and its fixtures are the record [#9272]
+  pasted verbatim — the Chinese `拒绝访问` an English install renders as "Access
+  denied" — so the reason recognition keys on the code rather than on the sentence
+  is exercised rather than asserted. Its two silent shapes are asserted **not** to
+  be recognized: there is nothing for a classifier to key on, and that is the
+  disclosure rather than an omission.
   What that proves is the decision layer against the producers' stamped values;
   the ACE-inheritance path itself is still unwitnessed here, and the advisory
   says as much by shipping no repair command.
@@ -1157,7 +1270,7 @@ than one that stays silent.
   outside the seam this plugin subscribes to. The report and its proposed fix
   stay with the maintainers; all this plugin can do is explain the provisioning
   failure that shares its root.
-- **The real fix is upstream, in all five families.** For the ACL failure,
+- **The real fix is upstream, in all six families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
   a 52-minute detour into one line belongs at that site. For the PTY failure,
@@ -1176,7 +1289,11 @@ than one that stays silent.
   throw an internal assertion a session can neither read nor act on, and the two
   ways out — a warning at session start, or a refusal that names the environment
   lever — belong where the assertion is raised rather than in a plugin that has to
-  guess the same pair back. This plugin is the stopgap for all five.
+  guess the same pair back. For the CIM refusal the site is the restricted token's
+  own lists, where the choice to leave Authenticated Users out is deliberate and
+  priced (it is what closes the `C:\`-root tree-creation escape) — so the repair
+  is not a wider grant but a measured statement of *which* check refuses the
+  namespace, which no one has produced. This plugin is the stopgap for all six.
 
 ## Compatibility
 
@@ -1209,8 +1326,9 @@ the newest of that line.
 
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
-the plugin, so `0.7.1` re-ran all five lines above, `0.9.0` re-ran them again, and
-`0.16.0` re-ran them a third time (all five `PASS`). A
+the plugin, so `0.7.1` re-ran all five lines above, `0.9.0` re-ran them again,
+`0.16.0` re-ran them a third time, and `0.17.0` a fourth — all five `PASS` each
+time. A
 line whose probe fails is removed from the range rather than left claimed. The
 scratch tree's resolved versions are the ones to read back when a probe is quoted
 as evidence — the probe script pins them by exact version, and `--keep` leaves the
@@ -1249,7 +1367,9 @@ legacy directory, two families collapsed into one bookkeeping slot, the advisory
 delivered per call instead of per agent, the loader-status read moved onto the
 error path, the family keyed on the rendered text, the third producer asserted
 rather than handed over as a mode switch, the code said to name its own
-direction, the `.NET` cause left standing — and requires that specific
+direction, the `.NET` cause left standing, the CIM platform gate inverted, the
+localized sentence keyed on instead of the status code, the CIM context marker
+guard dropped, a CIM substitute pair removed — and requires that specific
 arms fail. It reports `SILENT ARMS: none` when every arm bites, restores the
 source in a `finally`, and prints `EQUIVALENT` (with the reason) for a mutation
 the current runtime cannot distinguish rather than counting it as a pass.
@@ -1304,4 +1424,9 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8990]: https://github.com/deepseek-ai/deepseek-harness/discussions/8990
 [#8991]: https://github.com/deepseek-ai/deepseek-harness/discussions/8991
 [#9186]: https://github.com/deepseek-ai/deepseek-harness/discussions/9186
+[#9272]: https://github.com/deepseek-ai/deepseek-harness/discussions/9272
+[#1157]: https://github.com/deepseek-ai/deepseek-harness/discussions/1157
+[#4163]: https://github.com/deepseek-ai/deepseek-harness/discussions/4163
+[#997]: https://github.com/deepseek-ai/deepseek-harness/discussions/997
+[#1847]: https://github.com/deepseek-ai/deepseek-harness/discussions/1847
 [Discussion #9170]: https://github.com/deepseek-ai/deepseek-harness/discussions/9170

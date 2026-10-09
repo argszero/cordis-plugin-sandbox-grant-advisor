@@ -276,6 +276,48 @@
 # that cannot answer at all is disclosed once on the host log rather than passed
 # off as clear.
 
+# A SIXTH family is a boundary the harness DOCUMENTS, and the plugin carries it
+# anyway because the error does not (#9272, with its neighbours #1157, #4163,
+# #997, #1847). Under a confining Windows mode every WMI query and every cmdlet
+# built on one is refused with
+#
+#   0x80041003        (WBEM_E_ACCESS_DENIED)
+#
+# The restricted token's own lists do not carry the SIDs the WMI namespace
+# security check wants, so `Get-CimInstance` fails for any class and takes the
+# CIM-backed cmdlets with it — `Get-NetTCPConnection`, `Get-NetIPAddress`,
+# `Get-NetAdapter`, `Get-Volume`, `Get-ComputerInfo`. The backend states the
+# mechanism itself ("Authenticated Users is absent from both lists — the WMI
+# namespace security check fails (`0x80041003`), so CIM cmdlets and
+# `Get-ComputerInfo` are unavailable in every confined mode"), and the plugin
+# quotes that sentence as the authority rather than presenting a documented
+# boundary as a discovery. What it adds is the two things the documentation does
+# not supply. First, a measured NATIVE SUBSTITUTE for each command that stops
+# working, taken from the report's own measurements on one machine: `netstat -ano`
+# for listening ports, `Get-Process`, `Get-Service`,
+# `[System.IO.DriveInfo]::new('C').AvailableFreeSpace` for free space,
+# `Get-Counter '\Memory\Available MBytes'`, the registry key
+# `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion` for the OS version, and a
+# service's own health endpoint rather than a port check — with the two commands
+# the report supplies no replacement for (`Get-NetIPAddress`, `Get-NetAdapter`)
+# named as gaps rather than filled, since `ipconfig /all` was never measured
+# under a confining mode. Second, the two shapes that answer with a WRONG VALUE
+# and NO ERROR AT ALL, which is the half that matters to an agent:
+# `-ErrorAction SilentlyContinue` turns every refusal here into an empty result
+# (read as "nothing is listening"), and `Get-PSDrive` raises nothing while
+# reporting `0` for every drive's usage columns, because PowerShell 5.1 fills
+# them from a WMI query. The failure is not an infrastructure failure: a cmdlet
+# error is a nonzero exit, which the shipped shell tools report without marking
+# the result an error, so the code arrives in the settled value's own `stderr`
+# and never in `error.message` — the same value-read seam as the third family,
+# and like it the family is gated on the platform and on the resolved mode. It
+# names no repair: no ACE closes it, no elevation reaches it, and the one narrow
+# allowance a reader proposes — read access to `root/cimv2` — is a change to the
+# restricted token's own lists, the same absence of Authenticated Users that the
+# backend lists as what closes the `C:\`-root tree-creation escape. Nobody has
+# measured which of the token's checks refuses the namespace, so the advisory
+# declines to price a narrower fix and says so.
+
 - insert:
     - id: sandbox-grant-advisor
       name: '@argszero/cordis-plugin-sandbox-grant-advisor'
