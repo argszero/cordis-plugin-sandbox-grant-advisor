@@ -110,6 +110,23 @@
  *   name its own direction. The control arm also retires the `.NET self-contained`
  *   cause the earlier reports converged on, because pure-native programs die
  *   identically.
+ *   Since `0.18.0` that comparison carries a second axis and a second candidate.
+ *   The axis is the one the mode switch cannot see: `#9336` filed its own
+ *   counterexample — from the packaged desktop's chain every interpreter died
+ *   under `workspace-write` and every one reached exit 0 under `read-only`, while
+ *   the same runner under the same argv, started from an ordinary console-bearing
+ *   chain, returned 0 in **both** modes. So the failing combination is
+ *   *console-less host* **and** *confining token*, and a separating switch proves
+ *   the sandbox without naming the mechanism inside it; the check therefore runs
+ *   in two steps, and `#9238` supplies the second one as a measured matrix rather
+ *   than as a build-specific suspicion. The candidate is the token's **default
+ *   DACL**, which `setTokenDefaultDaclGrant` extends with a full-access ACE naming
+ *   `tempWriteSid ?? writeSid ?? Everyone` — which makes `workspace-write` the only
+ *   mode whose default DACL names a synthetic identity at all. It is named as a
+ *   candidate and not as an answer: nothing has measured it, and that ACE is what
+ *   keeps every piped grandchild spawning. What the switch costs is stated too,
+ *   because the report asked for it: under `read-only` PowerShell enters
+ *   ConstrainedLanguage, so a command that "works" there may no longer run.
  *   That Electron host was shipped as **two measurements**; since
  *   0.8.0 it is **one mechanism, named**: the runner must own a *console* for the
  *   confined child to inherit, and when it owns none the child's own console
@@ -298,8 +315,24 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * reason the advisory carries a third producer at all. Its control arm also
  * retires the `.NET self-contained` cause the earlier threads attracted: a
  * pure-native `whoami.exe` and `cmd.exe` die exactly as `pwsh` does.
+ *
+ * The last two threads are the console axis measured from outside, and they are
+ * why the third producer's check is now two steps rather than one. `#9238` did
+ * what no earlier report had: a launcher that varies only the runner's CONSOLE
+ * TOPOLOGY, six arms on one machine, with `DETACHED_PROCESS` the single failing
+ * one — so "does the runner own a console" stopped being a suspicion about a
+ * build and became a check anyone can run. It also states this family's CI
+ * blind spot plainly: the repository's own Windows checks run inside a
+ * console-bearing chain, which is the one configuration that works. `#9336`
+ * then filed the combination a bare mode switch mis-attributes — the packaged
+ * desktop's chain kills every interpreter under `workspace-write` and starts
+ * them all under `read-only`, while the same runner under the same argv returns
+ * 0 in BOTH modes from a console-bearing chain. That report is also the source
+ * of the `read-only` cost the advisory now states (ConstrainedLanguage) and of
+ * the default-DACL candidate, which the advisory carries as a candidate rather
+ * than as a finding.
  */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336'
 
 /**
  * The upstream threads the workspace-denial advisory is a stopgap for.
@@ -946,15 +979,48 @@ function nativeInitAdvisory(
     '     `read-only` list, which carries no capability SID, started the same program normally in both stdio',
     '     shapes (piped and inherited). The capability SIDs are derived per workspace and per private temp',
     '     directory, and they join the list only under `workspace-write`; `read-only` carries none by design.',
-    '     CHECK: hold the command and the tool fixed and change only the MODE. If `read-only` starts the command',
-    '     that `workspace-write` kills, this is the producer — one switch, no debugging tools, and it is the only',
-    '     discriminator this status code does not already give you (see the boundary below). If both modes fail,',
-    '     the difference is elsewhere and this is producer 2 (the host) or a cause outside the list entirely.',
+    '     CHECK, in TWO STEPS — the first alone does not settle it. Step 1: hold the command and the tool fixed',
+    '     and change only the MODE. `read-only` carries no capability SID, so if it starts the command that',
+    '     `workspace-write` kills, the sandbox IS the difference. Step 2: establish whether the runner OWNS A',
+    '     CONSOLE, because producer 2 fails the very same switch. #9336 measured that pair from the packaged',
+    '     desktop\'s chain: `cmd`, PowerShell 7 and PowerShell 5.1 all died under `workspace-write`, and all three',
+    '     reached exit 0 under `read-only` — while the same runner, same argv, started from an ordinary',
+    '     console-bearing chain returned 0 under BOTH modes. A separating switch therefore confirms the sandbox and',
+    '     does NOT name the mechanism inside it: this producer is the answer only when the runner DID own a',
+    '     console, which is the shape #9186 measured (real node host, DACLs untouched). Step 2 is cheap and needs',
+    '     no particular machine — start the runner from a `DETACHED_PROCESS` chain and the same command dies',
+    '     (#8208) — and #9238 isolated the axis itself with a launcher that varies only the runner\'s console',
+    '     topology: six arms on one machine, `DETACHED_PROCESS` the only one that died. If this process is',
+    '     already an Electron binary, per the host fact reported above, the console is missing by construction',
+    '     and the mode switch will separate for BOTH reasons at once. That is the pair #9336 filed, and reading',
+    '     it as producer 3 alone would be the wrong repair.',
     '     One thing this is NOT: `.NET`. Pure-native programs die here identically, so the "self-contained .NET',
     '     runtime" cause the earlier reports attracted is retired by that control arm.',
     '',
+    '     A second candidate sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL.',
+    '     `setTokenDefaultDaclGrant` merges one full-access ACE into it — `SetEntriesInAclW`, GRANT_ACCESS,',
+    '     FILE_ALL_ACCESS, onto the EXISTING default DACL, so it extends rather than replaces — because every new',
+    '     object the confined process creates takes its DACL from that default, and without a restricting SID named',
+    '     in it a new anonymous stdio pipe fails its own write check and every piped grandchild dies with `spawn',
+    '     EPERM`. WHICH SID it names is where the two modes differ a second time: `tempWriteSid ?? writeSid ??',
+    '     Everyone` — the private temp SID under `workspace-write` when a temp directory exists, otherwise the',
+    '     workspace SID, and Everyone under `read-only`. So `workspace-write` is the only mode whose default DACL',
+    '     names a synthetic identity at all: the workspace SID is a sha256 of the canonical workspace path',
+    '     (`S-1-4-x-y`), and the temp SID is a domain-separated identity derived from its own directory. That',
+    '     asymmetry is the one #9336 suspected, and it is a CANDIDATE and not an answer — nobody has measured it,',
+    '     and both mechanisms ride the same token in the same mode or not at all. Do not delete that ACE to test',
+    '     it either: it is load-bearing for every piped grandchild spawn.',
+    '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',
     'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
+    '',
+    'A `read-only` session is NOT a substitute for a working `workspace-write` one — the mode switch above is a',
+    'diagnostic, not a repair. The backend\'s own README states the cost: under `read-only`, PowerShell cannot',
+    'create its AppLocker probe files in temp and conservatively starts in ConstrainedLanguage, where `Add-Type`,',
+    'non-core .NET static calls, COM and reflection fail (and, per #9336, `[System.IO.File]::*` and',
+    '`Get-CimInstance`), while the shipped `workspace-write` path lets that probe complete and keeps FullLanguage',
+    'unless the machine carries a host-wide WDAC/AppLocker policy. A command that "works" after that switch may',
+    'therefore be a command that no longer runs at all.',
     '',
     'Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of',
     'its own DLLs dies this way too, and the backend\'s own source records the console case as an inherent',
@@ -972,8 +1038,9 @@ function nativeInitAdvisory(
     'layer records that a token built WITHOUT the logon-SID + EVERYONE keep-alive pair also dies in early DLL',
     'init with exactly this status (and `pwsh` earlier still, in its CNG path, as `0xE0434352`). Too few entries',
     'in the restricting list and too many — producer 3 — land on the same `0xC0000142`, so the status alone',
-    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one is producer 3\'s mode',
-    'switch.',
+    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one starts with producer',
+    '3\'s mode switch — which is why that check has two steps above rather than one, since the console-less host',
+    'fails the same switch for a different reason (#9336).',
     'The creation flags this harness actually passes are three sets and none of them is `CREATE_NO_WINDOW` —',
     '`0` on the piped path, `CREATE_SUSPENDED` on the inherited-job path, and',
     '`CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT` on the ordinary path (that constant is not defined anywhere',

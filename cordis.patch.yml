@@ -115,7 +115,7 @@
 # running one.
 #
 # A THIRD family is recognized from a value, not from text (#7876, #7877,
-# #8193, #8208, #8313, #8336, #8334, #8990, #8991, #9186):
+# #8193, #8208, #8313, #8336, #8334, #8990, #8991, #9186, #9238, #9336):
 #
 #   [exit code: -1073741502]        (0xC0000142 STATUS_DLL_INIT_FAILED)
 #
@@ -131,15 +131,28 @@
 # process never reached its entry point, enumerates the measured producers
 # (an MSYS2 / Git-Bash program that cannot create its signal pipe under the
 # restricted token; the sandbox runner hosted by a GUI-subsystem Electron binary
-# or spawned without a console; and the restricted token's own restricting list,
-# where a single capability SID — added only under `workspace-write`, so the same
-# command starts fine under `read-only` — kills every program, `whoami.exe` and
-# `cmd.exe` included, and the mode switch that separates it is the one comparison
-# this status code cannot supply, because too few entries in that list land on
-# the same `0xC0000142`), carries the one conversion the model can make
-# itself (rewrite the work as PowerShell or `cmd`), names the remedy #8193
-# measured — a real node.exe host, which the desktop ships — and says plainly
-# which producers it does not know. It also states the one rule the whole family
+# or spawned without a console — the axis #9238 isolated with a launcher that
+# varies only the runner's console topology; and the restricted token's own
+# restricting list, where a single capability SID — added only under
+# `workspace-write`, so the same command starts fine under `read-only` — kills
+# every program, `whoami.exe` and `cmd.exe` included), carries the one conversion
+# the model can make itself (rewrite the work as PowerShell or `cmd`), names the
+# remedy #8193 measured — a real node.exe host, which the desktop ships — and says
+# plainly which producers it does not know. The comparison it hands over is TWO
+# STEPS, because the mode switch alone does not name the mechanism: #9336 filed
+# the case where the packaged desktop's chain kills every interpreter under
+# `workspace-write` and starts them under `read-only`, while the same runner under
+# the same argv passes in both modes from a console-bearing chain — so the failing
+# combination is a console-less host AND a confining token, and the status code
+# still cannot supply the comparison (too few entries in the restricting list land
+# on the same `0xC0000142`). A second candidate on the same token is named as a
+# candidate and not as a finding: the token's DEFAULT DACL, which
+# `setTokenDefaultDaclGrant` extends with a full-access ACE naming
+# `tempWriteSid ?? writeSid ?? Everyone`, so `workspace-write` is the only mode
+# whose default DACL names a synthetic identity at all. And the advisory says what
+# the mode switch costs, because the backend's README does: under `read-only`
+# PowerShell enters ConstrainedLanguage, so it is a diagnostic step and not a
+# repair. It also states the one rule the whole family
 # follows from, because a reader without it reaches for the wrong flag: in a
 # restricted token a console can be INHERITED but not CREATED, so a creation
 # flag that forces the child to make one of its own — `CREATE_NO_WINDOW`,

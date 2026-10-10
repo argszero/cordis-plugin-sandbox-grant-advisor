@@ -58,7 +58,16 @@
  * included, while the `read-only` list starts them normally. Retrying is the one
  * thing that cannot work, and the code tells the model nothing on its own: the
  * same value is also produced by a token built **without** the logon-SID +
- * EVERYONE keep-alive pair, so it cannot name its own direction.
+ * EVERYONE keep-alive pair, so it cannot name its own direction. `0.18.0` adds the
+ * axis that comparison misses and the second candidate behind it: `#9336` filed the
+ * case where a console-less host separates the modes exactly as the restricting
+ * list does — every interpreter dying under `workspace-write` and starting under
+ * `read-only` from the desktop's chain, while the same argv passes in both modes
+ * from a console-bearing one — so the check runs in two steps and `#9238`'s
+ * console-topology matrix is what supplies the second; and the token's **default
+ * DACL** is named as the second candidate the report raised, unmeasured, with the
+ * asymmetry that makes it one (`workspace-write` is the only mode whose default
+ * DACL names a synthetic SID) and the reason it must not be deleted to test it.
  *
  * This family is read from the **canonical value of a successful result**, which
  * is why the seam below now inspects both outcomes. The producer never marks it

@@ -476,7 +476,7 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Ten reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+Twelve reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
 app), [`#8313`] (the same version and the same mode run as the desktop app versus
 the Web UI launched from a terminal, which works), [`#8334`] (the same code with
 the authorization side attached: the grant **succeeded** and every confined child
@@ -485,7 +485,10 @@ Bash), [`#8990`] and [`#8991`] (the same code on two more Windows builds, with n
 dependence on the PowerShell version or the install layout, and — for those
 machines — no way to tell which producer it was) and [`#9186`], which isolated it
 to a single input — and [`#8208`], which found the mechanism the console cases
-share, and [`#8336`], which measured the creation flags that mechanism turns on. All are `0xC0000142`
+share, [`#8336`], which measured the creation flags that mechanism turns on,
+[`#9238`], which isolated the mechanism's *input* by varying only the runner's
+console topology, and [`#9336`], which filed the combination a bare mode switch
+mis-attributes and the two costs that go with it. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
@@ -529,6 +532,28 @@ Three producers have been measured under a confining mode:
    runs fine on that machine. The plugin reports whether *this* process is an
    Electron binary (`process.versions.electron`) as a measured fact rather than
    assuming it.
+
+   **Since `0.18.0` this axis has its own measurement, and it is the reason the
+   third producer's check is two steps rather than one.** [`#9238`] built a ~90-line
+   Win32 launcher that varies **only the runner's console topology**, held
+   everything else — machine, workspace, temp directory, mode, argv, restricted
+   token — constant, and ran six arms on one machine: `DETACHED_PROCESS` (no
+   console at all) died with `0xC0000142` and zero output, while `CREATE_NO_WINDOW`
+   (Windows allocates the runner an invisible console), `CREATE_NEW_CONSOLE`,
+   inheriting an existing console, and a hidden-console `wscript → cmd` carrier all
+   reached the program with its stdout intact, and the same `DETACHED_PROCESS`
+   launch **without** the restricted token was fine. So the console is not an
+   inference from two host binaries any more: it is a variable one launcher can
+   turn on and off, which is what makes "does the runner own a console" a check
+   rather than a suspicion about a build. The same report states this family's CI
+   blind spot in one sentence and it is worth quoting in the plugin's own words:
+   the repository's Windows checks run in a **console-bearing** chain — the one
+   configuration the matrix shows working — so a green check there cannot falsify
+   this producer. The clarification [`#9238`] adds to the backend's recording is
+   the distinction the flag vocabulary below turns on: `CREATE_NO_WINDOW` on the
+   **restricted child** is fatal, while `CREATE_NO_WINDOW` on the **runner** is the
+   fix, because Windows then gives the runner an invisible console for the child to
+   inherit.
 
    **`0.7.x` named two shapes and explained them with the wrong mechanism, and
    `0.8.0` withdraws one of the shapes outright.** The withdrawn shape is "the
@@ -646,20 +671,66 @@ Three producers have been measured under a confining mode:
    `read-only ? [logonSid, world] : [logonSid, world, ...writeSids]`), so
    `read-only` carries none **by design**.
 
-   **The check is a mode switch, and it is the only one this status code does not
-   already give you.** Hold the command and the tool fixed and change only the
-   mode: if `read-only` starts the command that `workspace-write` kills, this is
-   the producer. That is one setting rather than a debugging session — and it is
-   the answer to the one thing `0xC0000142` cannot say, because **the same code
-   runs in both directions**: the restricted-token layer's own docstring records
-   that a token built *without* the logon-SID + EVERYONE keep-alive pair also dies
-   in early DLL init with exactly this status (and `pwsh` earlier still, in its
-   CNG path, as `0xE0434352`). Too few entries in the restricting list and too
-   many land on the same `0xC0000142`, so the code cannot name its own direction;
-   only a comparison can. One thing this is **not**: `.NET`. Pure-native programs
-   die here identically, which retires the "self-contained .NET runtime" cause the
-   earlier reports converged on — that is the report's own control arm, not an
-   assertion of ours.
+   **The check is a mode switch, and since `0.18.0` it is the FIRST of two steps
+   rather than the whole answer.** Hold the command and the tool fixed and change
+   only the mode: if `read-only` starts the command that `workspace-write` kills,
+   the sandbox is the difference. That is one setting rather than a debugging
+   session — and it is the answer to the one thing `0xC0000142` cannot say, because
+   **the same code runs in both directions**: the restricted-token layer's own
+   docstring records that a token built *without* the logon-SID + EVERYONE
+   keep-alive pair also dies in early DLL init with exactly this status (and `pwsh`
+   earlier still, in its CNG path, as `0xE0434352`). Too few entries in the
+   restricting list and too many land on the same `0xC0000142`, so the code cannot
+   name its own direction; only a comparison can.
+
+   **What the switch cannot do is name the mechanism inside the sandbox, and
+   [`#9336`] is the report that proves it.** That reporter ran the *packaged
+   desktop's* chain and the *ordinary* `explorer → cmd → pwsh` chain against the
+   same runner with the same argv: from the desktop chain `cmd`, PowerShell 7 and
+   PowerShell 5.1 all died under `workspace-write` and all three reached exit `0`
+   under `read-only`, while the console-bearing chain returned `0` in **both**
+   modes (and still enforced the sandbox — an out-of-workspace write exited `1` with
+   no file created). That is exactly what producer 3 looks like from the outside,
+   and it is producer 2: **the failing combination is a console-less host AND a
+   confining token**, and a mode switch made inside a console-less host separates
+   for both reasons at once. So the second step is "does the runner own a console",
+   it is answered by producer 2's own arm (start the runner from a
+   `DETACHED_PROCESS` chain — no desktop, no particular machine), and this producer
+   is the answer only when the runner **did** own one — the shape [`#9186`]
+   measured, with a real node host and the DACLs untouched.
+
+   **A second candidate rides the same token, and it is carried as a candidate.**
+   [`#9336`] reasoned that adding SIDs to a restricting list only *widens* write
+   access, so the more suspicious input is the ACE the backend merges into the
+   token's **default DACL**. That reading is right about the asymmetry and
+   unmeasured about the effect: `setTokenDefaultDaclGrant`
+   (`sandbox-windows-acl/src/token.ts`) merges one full-access restricting-SID ACE
+   into the **existing** default DACL — `SetEntriesInAclW`, `GRANT_ACCESS`,
+   `FILE_ALL_ACCESS`, extended rather than replaced — and the SID it names is
+   `tempWriteSid ?? writeSid ?? Everyone` (`src/index.ts:304`): the private temp
+   SID under `workspace-write` when a temp directory exists, otherwise the
+   workspace SID (a sha256 of the canonical workspace path, `S-1-4-x-y`), and
+   Everybody under `read-only`. So `workspace-write` is the only mode whose default
+   DACL names a synthetic identity at all — a real second difference between the
+   modes — and nobody has measured that ACE. The merge is also load-bearing in a way
+   that forbids the obvious experiment: every new object the confined process
+   creates takes its DACL from there, so an ACE removed to test the theory takes
+   every piped grandchild spawn down with it (`spawn EPERM`). The advisory names it,
+   says it is unmeasured, and says not to delete it.
+
+   **And the switch costs something, which the backend's README states.** Under
+   `read-only` PowerShell cannot create its AppLocker probe files in temp and
+   conservatively starts in **ConstrainedLanguage**, where `Add-Type`, non-core
+   .NET static calls, COM and reflection fail — [`#9336`] adds
+   `[System.IO.File]::*` and `Get-CimInstance` to that list — while the shipped
+   `workspace-write` path lets the probe complete and keeps FullLanguage unless the
+   machine carries a host-wide WDAC/AppLocker policy
+   (`packages/sandbox/sandbox-windows-acl/README.md:192`). A command that "works"
+   after the switch may therefore be a command that no longer runs at all: the
+   switch is a diagnostic, not a repair. One thing this producer is **not**:
+   `.NET`. Pure-native programs die here identically, which retires the
+   "self-contained .NET runtime" cause the earlier reports converged on — that is
+   the report's own control arm, not an assertion of ours.
 
 **Why this family is read from a successful result.** The producer never marks
 it an error, and that is a fact about upstream rather than a choice here:
@@ -703,9 +774,16 @@ Three producers have been measured under a confining Windows mode. Check which o
   2. The packaged desktop application's sandbox runner ... (#8193, #8208)
      This process is NOT an Electron binary (`process.versions.electron` is unset), so producer 2 does not apply here.
   3. A capability SID inside the restricted token's own restricting list ... (#9186)
-     CHECK: hold the command and the tool fixed and change only the MODE ...
+     CHECK, in TWO STEPS — the first alone does not settle it. Step 1: ... change only the MODE ...
+     Step 2: establish whether the runner OWNS A CONSOLE, because producer 2 fails the very same switch ...
+
+     A second candidate sits on the SAME token and is NOT the restricting list: the token's DEFAULT DACL ...
+     it is a CANDIDATE and not an answer — nobody has measured it ...
 
 Do not retry this call: the environment has not changed, and the identical call produces the identical code.
+
+A `read-only` session is NOT a substitute for a working `workspace-write` one — the mode switch above is a
+diagnostic, not a repair. ... under `read-only`, PowerShell ... starts in ConstrainedLanguage ...
 
 Honest boundary — 0xC0000142 has producers this list does not have: a program that cannot load one of
 its own DLLs dies this way too, and the sandbox backend's own source records that a child started with
@@ -1327,8 +1405,8 @@ the newest of that line.
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
 the plugin, so `0.7.1` re-ran all five lines above, `0.9.0` re-ran them again,
-`0.16.0` re-ran them a third time, and `0.17.0` a fourth — all five `PASS` each
-time. A
+`0.16.0` re-ran them a third time, `0.17.0` a fourth and `0.18.0` a fifth — all
+five `PASS` each time. A
 line whose probe fails is removed from the range rather than left claimed. The
 scratch tree's resolved versions are the ones to read back when a probe is quoted
 as evidence — the probe script pins them by exact version, and `--keep` leaves the
@@ -1424,6 +1502,8 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#8990]: https://github.com/deepseek-ai/deepseek-harness/discussions/8990
 [#8991]: https://github.com/deepseek-ai/deepseek-harness/discussions/8991
 [#9186]: https://github.com/deepseek-ai/deepseek-harness/discussions/9186
+[#9238]: https://github.com/deepseek-ai/deepseek-harness/discussions/9238
+[#9336]: https://github.com/deepseek-ai/deepseek-harness/discussions/9336
 [#9272]: https://github.com/deepseek-ai/deepseek-harness/discussions/9272
 [#1157]: https://github.com/deepseek-ai/deepseek-harness/discussions/1157
 [#4163]: https://github.com/deepseek-ai/deepseek-harness/discussions/4163

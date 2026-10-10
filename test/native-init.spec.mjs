@@ -265,7 +265,70 @@ test('the third producer is a fact about the mode, so the comparison is handed o
   const body = contexts(await call(readOnly.ctx, 'pwsh', { command: 'whoami.exe' }))[0]
     .content.map(block => block.text).join('\n')
   assert.match(body, /#9186/)
-  assert.match(body, /CHECK: hold the command and the tool fixed and change only the MODE/)
+  assert.match(body, /CHECK, in TWO STEPS/)
+  assert.match(body, /hold the command and the tool fixed\s+and change only the MODE/)
   assert.match(body, /every program died this way/i)
   assert.match(body, /retired by that control arm/)
+})
+
+test('the mode switch is one step of two, because a console-less host fails it the same way (0.18.0)', async () => {
+  // #9336 filed the counterexample the single-step check mis-attributed: from the
+  // packaged desktop's chain every interpreter dies under `workspace-write` and
+  // starts under `read-only`, which is exactly what producer 3 looks like from
+  // outside — while the same runner under the same argv returns 0 in both modes
+  // from a console-bearing chain. A check that stops at step 1 answers "the
+  // restricting list" for a failure that is producer 2, and a reader who repairs
+  // that answer has learned nothing.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'cmd /c echo x' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /Step 1: hold the command and the tool fixed/)
+  assert.match(body, /Step 2: establish whether the runner OWNS A\s+CONSOLE/)
+  assert.match(body, /fails the very same switch/)
+  assert.match(body, /producer 2 fails the very same switch/)
+  assert.match(body, /this producer is the answer only when the runner DID own a\s+console/)
+  // The second step is the one anyone can run, and #9238 is why: a launcher that
+  // varies only the runner's console topology.
+  assert.match(body, /DETACHED_PROCESS` chain and the same command dies/)
+  assert.match(body, /#9238 isolated the axis itself/)
+  assert.match(body, /That is the pair #9336 filed/)
+  // Both threads are also carried where the family's reports are listed. Asserted
+  // as the END of that line rather than as a mention anywhere in the body: the
+  // producers name these two threads in their own prose, so a mention proves
+  // nothing about the list a reader is sent to.
+  assert.match(body, /tracked upstream \(discussions [^)\n]*#9238 \/ #9336\)/)
+})
+
+test('read-only is named as a diagnostic and not as a repair, with the language mode it costs', async () => {
+  // The report asked for this and the backend's README supplies the reason: under
+  // `read-only` PowerShell cannot create its AppLocker probe files in temp and
+  // conservatively starts in ConstrainedLanguage. An advisory that hands over a
+  // mode switch without that cost is telling a reader to trade a loud failure for
+  // a silent one.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'Get-CimInstance Win32_Process' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /A `read-only` session is NOT a substitute/)
+  assert.match(body, /diagnostic, not a repair/)
+  assert.match(body, /ConstrainedLanguage/)
+  assert.match(body, /AppLocker probe files/)
+  assert.match(body, /WDAC\/AppLocker policy/)
+})
+
+test('the token default DACL is carried as a candidate, with the asymmetry that makes it one', async () => {
+  // #9336's suspicion, stated precisely and not promoted to a finding: the mode
+  // switch has a second difference besides the restricting list — the SID the
+  // backend merges into the token's default DACL, which is synthetic only under
+  // `workspace-write`. Nothing has measured that ACE, and it cannot simply be
+  // removed to test it: it is what keeps every piped grandchild spawning.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'cmd /c echo x' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /A second candidate sits on the SAME token/)
+  assert.match(body, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
+  assert.match(body, /it extends rather than replaces/)
+  assert.match(body, /tempWriteSid \?\? writeSid \?\?\s+Everyone/)
+  assert.match(body, /only mode whose default DACL\s+names a synthetic identity at all/)
+  assert.match(body, /CANDIDATE and not an answer/)
+  assert.match(body, /load-bearing for every piped grandchild spawn/)
 })

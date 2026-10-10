@@ -225,7 +225,43 @@ const MUTATIONS = [
     name: 'the restricting-list producer is asserted rather than handed over as a mode switch',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    '     CHECK: hold the command and the tool fixed and change only the MODE. If `read-only` starts the command',", "    '     This is producer 3, the restricting list, so the mode is not worth comparing any further.',"]],
+    edits: [["    '     CHECK, in TWO STEPS — the first alone does not settle it. Step 1: hold the command and the tool fixed',", "    '     This is producer 3, the restricting list, so the mode is not worth comparing any further.',"]],
+  },
+  {
+    // 0.18.0's addition: #9336 filed the counterexample the single-step check
+    // mis-attributes — a console-less host fails the mode switch the same way, so
+    // a check that stops at step 1 answers "the restricting list" for a failure
+    // that is producer 2.
+    name: 'the mode switch is presented as sufficient again, so a console-less host reads as producer 3',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [["    '     CONSOLE, because producer 2 fails the very same switch. #9336 measured that pair from the packaged',", "    '     CONSOLE. #9336 measured that pair from the packaged',"]],
+  },
+  {
+    // The second candidate promoted to a finding. Nothing has measured that ACE,
+    // and the report framed it as a suspicion precisely because the mechanism
+    // could not be isolated on that machine.
+    name: 'the default-DACL candidate is asserted as the answer instead of named as a candidate',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [["    '     asymmetry is the one #9336 suspected, and it is a CANDIDATE and not an answer — nobody has measured it,',", "    '     asymmetry is the one #9336 isolated, and it is the answer for this failure:',"]],
+  },
+  {
+    // The cost the report asked to have stated. Handing over the mode switch
+    // without it tells a reader to trade an unexplained exit code for a shell
+    // whose language mode refuses the work.
+    name: 'the mode switch is offered as the repair, with the ConstrainedLanguage cost dropped',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [["    'A `read-only` session is NOT a substitute for a working `workspace-write` one — the mode switch above is a',", "    'A `read-only` session solves this, and the mode switch above is a',"]],
+  },
+  {
+    // The console axis carries its own measurement since 0.18.0; a thread list
+    // that drops it cites a report whose whole contribution was that matrix.
+    name: 'the thread list drops the console axis the second step hands over',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'"]],
   },
   {
     // The same producer's honesty boundary: the code runs in BOTH directions, so

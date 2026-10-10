@@ -765,16 +765,23 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.match(flat, /EVERY program died this way \(`whoami\.exe` and `cmd\.exe` as well as `pwsh`\)/)
   assert.match(flat, /list, which carries no capability SID, started the same program normally/)
   assert.match(flat, /the list only under `workspace-write`; `read-only` carries none by design/)
-  assert.match(flat, /CHECK: hold the command and the tool fixed and change only the MODE/)
-  assert.match(flat, /it is the only discriminator this status code does not already give you/)
-  assert.match(flat, /this is producer 2 \(the host\) or a cause outside the list entirely/)
-  // The cause it retires, and the reason the code cannot name its own direction:
-  // too few entries in the restricting list land on the same status as too many,
-  // so no reading of the code alone can separate them.
+  assert.match(flat, /CHECK, in TWO STEPS/)
+  assert.match(flat, /Step 1: hold the command and the tool fixed/)
+  assert.match(flat, /Step 2: establish whether the runner OWNS A/)
+  assert.match(flat, /A separating switch therefore confirms the sandbox and/)
+  assert.match(flat, /this producer is the answer only when the runner DID own a/)
+  // The second candidate, and the asymmetry that makes it one: the token's
+  // default DACL names a synthetic SID only under `workspace-write`.
+  assert.match(flat, /A second candidate sits on the SAME token/)
+  assert.match(flat, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
+  assert.match(flat, /CANDIDATE and not an answer/)
+  // And the cost of the switch, which the backend's README states.
+  assert.match(flat, /A `read-only` session is NOT a substitute/)
+  assert.match(flat, /ConstrainedLanguage/)
   assert.match(flat, /Pure-native programs die here identically/)
   assert.match(flat, /retired by that control arm/)
   assert.match(flat, /Too few entries in the restricting list and too many — producer 3 — land on the same/)
-  assert.match(flat, /Only a comparison can, and the cheapest one is producer 3's mode switch/)
+  assert.match(flat, /Only a comparison can, and the cheapest one starts with producer/)
   // The token's groups/privileges answer for producer 2 does not answer for
   // producer 3, and the text says which member of the token producer 3 changes.
   assert.match(flat, /That says nothing about which SIDs the token was RESTRICTED to/)
