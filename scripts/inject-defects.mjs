@@ -261,7 +261,43 @@ const MUTATIONS = [
     name: 'the thread list drops the console axis the second step hands over',
     file: 'src/advice.ts',
     arms: 'native-init.spec.mjs',
-    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'"]],
+    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'"]],
+  },
+  {
+    // 0.20.0's whole addition: #9467 turned the third producer's input from one
+    // measurement into a rule. Dropping the count leaves the sentence reading as an
+    // assertion about Windows instead of the result of sixteen arms.
+    name: 'the rule is asserted without the measurement that made it one',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     restricting list inside one host, and it holds 16 of 16 arms: the child dies exactly when the list',", "    '     restricting list inside one host: the child dies when the list',"]],
+  },
+  {
+    // The consequence the rule licenses — that no setting repairs it — rests on the
+    // write SIDs being derived from a path. Weakened to a tunable setting, the text
+    // sends the reader back to the policy knobs #9467 had already held fixed.
+    name: 'the path-derived write SID is described as a tunable setting',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any token — so the token that may',", "    '     `S-1-4-x-y-1`), and a path-derived SID can be added to the token own groups when the settings allow — so the token that may',"]],
+  },
+  {
+    // The one self-rescue the report closed: adding the capability SID to the
+    // token's groups is refused (Win32 error 87). Omitting that refusal hands the
+    // reader a way out the operating system does not have.
+    name: 'the refused self-rescue is turned into a way out',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    '     REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. #9467 measured all of this on',", "    '     available: `SetTokenInformation(TokenGroups)` takes the capability SID. #9467 measured all of this on',"]],
+  },
+  {
+    // #9471 is scope, not a member: a child that STARTS and then fails to load a
+    // library at runtime carries a message of its own. Claiming it as this family is
+    // the confident wrong cause the classifier's fail-closed rule exists to prevent.
+    name: 'the runtime-load shape is claimed as this family instead of named as scope',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [["    'claim: its status is not this one and it carries a message of its own (`#9471`), so classifying it here',", "    'claim: it is the same loader failure seen from a different place, so classifying it here',"]],
   },
   {
     // The same producer's honesty boundary: the code runs in BOTH directions, so
@@ -342,11 +378,14 @@ const MUTATIONS = [
   {
     // The third family's own new threads: 0.16.0 added three reports to the
     // advisory and this prose has no compiler over it, so the same arm that keeps
-    // the second family honest has to cover the new ones too.
+    // the second family honest has to cover the new ones too. Re-anchored in
+    // 0.20.0, when #9463 and #9467 moved the end of that list: an anchor that no
+    // longer matches makes the arm a silent no-op, which is how a release ships
+    // with the arm that protects it disarmed.
     name: 'the mount instructions drop the third family\'s newest threads',
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
-    edits: [['#8334, #8990, #8991, #9186, #9238, #9336):', '#8334):']],
+    edits: [['#8334, #8990, #8991, #9186, #9238, #9336,\n# #9463, #9467):', '#8334):']],
   },
   {
     // Both of the fourth family's threads, not only the first: the family gained a

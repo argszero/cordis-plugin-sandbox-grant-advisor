@@ -479,7 +479,7 @@ the advisory never names the dead directory.
 
 ### 3. A confined child that never started (`native-init`)
 
-Twelve reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
+Thirteen reports of one exit code: [`#7876`] and [`#8193`] (the packaged desktop
 app), [`#8313`] (the same version and the same mode run as the desktop app versus
 the Web UI launched from a terminal, which works), [`#8334`] (the same code with
 the authorization side attached: the grant **succeeded** and every confined child
@@ -490,12 +490,21 @@ machines — no way to tell which producer it was) and [`#9186`], which isolated
 to a single input — and [`#8208`], which found the mechanism the console cases
 share, [`#8336`], which measured the creation flags that mechanism turns on,
 [`#9238`], which isolated the mechanism's *input* by varying only the runner's
-console topology, and [`#9336`], which filed the combination a bare mode switch
-mis-attributes and the two costs that go with it. All are `0xC0000142`
+console topology, [`#9336`], which filed the combination a bare mode switch
+mis-attributes and the two costs that go with it, and [`#9467`], which turned the
+third producer's input into a **rule** — measured on Windows 10 19044, so the build
+number is not the variable. All are `0xC0000142`
 `STATUS_DLL_INIT_FAILED` — the Windows
 loader terminated the process while it was initializing its native images, i.e.
 **before the program's entry point**. A command that ran and then failed exits
 with its own status and prints its own output; this one produced neither.
+
+Two reports filed in the same wave are **scope, not members**, and the advisory
+names them as such rather than folding them in: [`#9463`] is the same backend
+**stalling before any child is spawned at all** (no `approval/request` event, no
+process), and [`#9471`] is a child that *does* start and then fails to load a
+library at runtime, dying with `E_ACCESSDENIED` (`0x80070005`) and a message of its
+own instead of this bare status. Neither carries `0xC0000142`.
 
 | what was run | what came out | exit code |
 | --- | --- | --- |
@@ -674,6 +683,28 @@ Three producers have been measured under a confining mode:
    `read-only ? [logonSid, world] : [logonSid, world, ...writeSids]`), so
    `read-only` carries none **by design**.
 
+   **Since `0.20.0` that input has a rule, and the rule is what makes the producer
+   structural rather than tunable.** [`#9467`] changed only the *third* entry of the
+   restricting list inside one host and got the same child, sixteen times over: it
+   dies with `0xC0000142` **exactly when the list carries a SID that is not an
+   enabled group of the token being restricted**. EVERYONE, `S-1-5-4`, `S-1-5-11`
+   and `S-1-5-32-545` are groups of the token and start it; the write SIDs
+   (`S-1-4-*`), `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and `S-1-16-4096` are not, and
+   kill it. Two consequences follow, and both are stated in the advisory:
+
+   - **No setting repairs it.** The write SIDs are *derived from a path* —
+     `S-1-4-x-y`, with the private temp one at `S-1-4-x-y-1`
+     (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID can never
+     be an enabled group of a token. So under `workspace-write` the token that may
+     write is the token that cannot start the child, while `read-only`, carrying no
+     such SID, starts it and simply does not write.
+   - **Self-rescue is refused.** Adding the capability SID to the token's own groups
+     fails: `SetTokenInformation(TokenGroups)` → Win32 error 87.
+
+   The build number is not the variable here: this family had only ever been
+   measured on Windows 11 26200, and [`#9467`] reproduced the whole structure on
+   Windows 10 19044.
+
    **The check is a mode switch, and since `0.18.0` it is the FIRST of two steps
    rather than the whole answer.** Hold the command and the tool fixed and change
    only the mode: if `read-only` starts the command that `workspace-write` kills,
@@ -779,6 +810,11 @@ Three producers have been measured under a confining Windows mode. Check which o
   3. A capability SID inside the restricted token's own restricting list ... (#9186)
      CHECK, in TWO STEPS — the first alone does not settle it. Step 1: ... change only the MODE ...
      Step 2: establish whether the runner OWNS A CONSOLE, because producer 2 fails the very same switch ...
+
+     Since 0.20.0 there is a RULE for which input does it: the child dies exactly when the restricting list
+     carries a SID that is NOT an enabled group of the token (16 of 16 arms, #9467, on Windows 10 19044).
+     The write SIDs are DERIVED FROM A PATH, and a path-derived SID is never an enabled group of any token —
+     so this producer cannot be tuned away, and adding the SID to the token's groups is refused (Win32 87).
 
      A second candidate sits on the SAME token and is NOT the restricting list: the token's DEFAULT DACL ...
      it is a CANDIDATE and not an answer — nobody has measured it ...
@@ -1612,3 +1648,6 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#997]: https://github.com/deepseek-ai/deepseek-harness/discussions/997
 [#1847]: https://github.com/deepseek-ai/deepseek-harness/discussions/1847
 [Discussion #9170]: https://github.com/deepseek-ai/deepseek-harness/discussions/9170
+[#9467]: https://github.com/deepseek-ai/deepseek-harness/discussions/9467
+[#9463]: https://github.com/deepseek-ai/deepseek-harness/discussions/9463
+[#9471]: https://github.com/deepseek-ai/deepseek-harness/discussions/9471

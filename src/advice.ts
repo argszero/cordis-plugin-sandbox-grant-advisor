@@ -142,6 +142,27 @@
  *   want of that variable. A withdrawn cause earns its sentence because this
  *   advisory shipped it twice; a confidently wrong cause is worse than two named
  *   ones with one shared remedy.
+ *   Since `0.20.0` this producer's input has a **rule** rather than one measurement, and
+ *   `#9467` produced it by changing only the third entry of the restricting list inside one
+ *   host: a confined child dies with `0xC0000142` **exactly when the list carries a SID that
+ *   is not an enabled group of the token being restricted** — 16 of 16 arms. EVERYONE,
+ *   `S-1-5-4`, `S-1-5-11` and `S-1-5-32-545` are groups of the token and start the child;
+ *   `S-1-4-*` (the real derived values), `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and
+ *   `S-1-16-4096` are not, and kill it. That is what turns this producer from a knob into a
+ *   structure: the write SIDs are DERIVED FROM A PATH — `S-1-4-x-y`, and its temp sibling
+ *   `S-1-4-x-y-1` (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID can
+ *   never be an enabled group of a token, so `workspace-write` cannot both grant the write and
+ *   start the child, whatever the settings. #9467 measured that on Windows 10 19044, so the
+ *   build number is not the variable and the rule is a measurement rather than an inference.
+ *   The same comment closed the one self-rescue left: adding the capability SID to the
+ *   token's groups is REFUSED — `SetTokenInformation(TokenGroups)` → Win32 error 87.
+ *   Two reports in that wave are carried as SCOPE, and only as scope. `#9463` shows the same
+ *   backend STALLING before any child is spawned at all (no `approval/request`, no process) —
+ *   a third shape of one backend rather than this family. `#9471` shows a child that DOES
+ *   start and then dies loading a library at runtime, carrying a message (`E_ACCESSDENIED
+ *   0x80070005`, exit `0x80008082`) instead of a bare status; that shape is deliberately NOT
+ *   claimed, because it is message-bearing and its code is not this family's — the same
+ *   fail-closed rule that keeps `0xC0000409` and `0xC0000135` out of the classifier.
  * - **The workspace-internal denial** (`workspace-denial`, #423) is the fourth,
  *   and it is the first whose remedy is **withheld on purpose**. The failure is
  *   not that a command failed but that the workspace's own grant does not cover
@@ -348,8 +369,22 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * of the `read-only` cost the advisory now states (ConstrainedLanguage) and of
  * the default-DACL candidate, which the advisory carries as a candidate rather
  * than as a finding.
+ *
+ * `#9467` and `#9463` are the third wave, filed on Windows 10 19044 and Windows 11
+ * 26200 on one day. `#9467` is the one that made this producer a rule rather than a
+ * measurement: varying only the third entry of the restricting list inside a single
+ * host, it showed the child dies exactly when that entry is not an enabled group of
+ * the token (16 of 16 arms), and that adding a capability SID to the token's groups
+ * to escape the state is refused (`SetTokenInformation(TokenGroups)` → Win32 error
+ * 87). Its build number matters as much as its rule: this family had only ever been
+ * measured on 26200, and the same structure reproduces on 19044. `#9463` is the
+ * scope half — the same backend stalling before any child is spawned at all (no
+ * `approval/request`, no process), which is neither this family nor any of the
+ * others, and is carried so a reader knows the shape exists without this advisory
+ * claiming it. `#9471`'s message-bearing runtime-load denial is named as scope for
+ * the same reason and is likewise not classified.
  */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'
 
 /**
  * The upstream threads the workspace-denial advisory is a stopgap for.
@@ -1040,6 +1075,18 @@ function nativeInitAdvisory(
     '     One thing this is NOT: `.NET`. Pure-native programs die here identically, so the "self-contained .NET',
     '     runtime" cause the earlier reports attracted is retired by that control arm.',
     '',
+    '     Since 0.20.0 there is a RULE for which input does it, measured by changing only the third entry of the',
+    '     restricting list inside one host, and it holds 16 of 16 arms: the child dies exactly when the list',
+    '     carries a SID that is NOT an enabled group of the token being restricted. EVERYONE, `S-1-5-4`,',
+    '     `S-1-5-11` and `S-1-5-32-545` are groups of the token and start it; the write SIDs (`S-1-4-*`),',
+    '     `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and `S-1-16-4096` are not, and kill it. That is also why this',
+    '     producer cannot be tuned away: the write SIDs are DERIVED FROM A PATH (`S-1-4-x-y`, the temp one',
+    '     `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any token — so the token that may',
+    '     write is the token that cannot start the child, while `read-only`, which carries no such SID, starts it',
+    '     and simply does not write. Escaping it by adding the capability SID to the token\'s own groups is',
+    '     REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. #9467 measured all of this on',
+    '     Windows 10 19044, so the build number is not the variable here.',
+    '',
     '     A second candidate sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL.',
     '     `setTokenDefaultDaclGrant` merges one full-access ACE into it — `SetEntriesInAclW`, GRANT_ACCESS,',
     '     FILE_ALL_ACCESS, onto the EXISTING default DACL, so it extends rather than replaces — because every new',
@@ -1077,6 +1124,10 @@ function nativeInitAdvisory(
     '`STARTF_USESHOWWINDOW` with `SW_HIDE` — how a window is hidden without isolating a console — was harmless,',
     'and so was `CREATE_NO_WINDOW` on an UNRESTRICTED token, which is what makes the two a pair rather than a',
     'list of forbidden flags.',
+    'A child that STARTS and then fails to load a library at runtime is a further shape this advisory does not',
+    'claim: its status is not this one and it carries a message of its own (`#9471`), so classifying it here',
+    'would be a confident wrong cause. The line above about a program that cannot load its own DLLs covers the',
+    'case where such a program dies BEFORE its entry point — the shape this family is about.',
     'The same code runs in BOTH directions, which is why it cannot name its own cause: the restricted-token',
     'layer records that a token built WITHOUT the logon-SID + EVERYONE keep-alive pair also dies in early DLL',
     'init with exactly this status (and `pwsh` earlier still, in its CNG path, as `0xE0434352`). Too few entries',

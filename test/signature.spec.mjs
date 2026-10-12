@@ -780,6 +780,29 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.match(flat, /ConstrainedLanguage/)
   assert.match(flat, /Pure-native programs die here identically/)
   assert.match(flat, /retired by that control arm/)
+  // 0.20.0: the third producer's input stopped being one measurement and became a
+  // rule — the child dies exactly when the restricting list carries a SID that is
+  // not an enabled group of the token — and that is what turns it from a knob into
+  // a structure: the write SIDs are path-derived, so no setting repairs it, and the
+  // one self-rescue (adding the SID to the token's groups) is refused.
+  assert.match(flat, /Since 0\.20\.0 there is a RULE for which input does it/)
+  assert.match(flat, /it holds 16 of 16 arms/)
+  assert.match(flat, /carries a SID that is NOT an enabled group of the token being restricted/)
+  assert.match(flat, /are groups of the token and start it/)
+  assert.match(flat, /are not, and kill it/)
+  assert.match(flat, /the write SIDs are DERIVED FROM A PATH/)
+  assert.match(flat, /a path-derived SID is never an enabled group of any token/)
+  assert.match(flat, /the token that may\s+write is the token that cannot start the child/)
+  assert.match(flat, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
+  // The build number is named as not-the-variable, because this family had only
+  // ever been measured on one Windows build before #9467.
+  assert.match(flat, /#9467 measured all of this on Windows 10 19044/)
+  assert.match(flat, /the build number is not the variable here/)
+  // And the scope boundary: a child that starts and then fails to load at runtime
+  // carries a message of its own and is deliberately not claimed (#9471).
+  assert.match(flat, /fails to load a library at runtime is a further shape this advisory does not/)
+  assert.match(flat, /`#9471`/)
+  assert.match(flat, /would be a confident wrong cause/)
   assert.match(flat, /Too few entries in the restricting list and too many — producer 3 — land on the same/)
   assert.match(flat, /Only a comparison can, and the cheapest one starts with producer/)
   // The token's groups/privileges answer for producer 2 does not answer for

@@ -295,8 +295,10 @@ test('the mode switch is one step of two, because a console-less host fails it t
   // Both threads are also carried where the family's reports are listed. Asserted
   // as the END of that line rather than as a mention anywhere in the body: the
   // producers name these two threads in their own prose, so a mention proves
-  // nothing about the list a reader is sent to.
-  assert.match(body, /tracked upstream \(discussions [^)\n]*#9238 \/ #9336\)/)
+  // nothing about the list a reader is sent to. 0.20.0 moved the end: #9467 and
+  // #9463 joined the list, so the pinned end is what keeps a later release from
+  // appending a thread the advisories never cover.
+  assert.match(body, /tracked upstream \(discussions [^)\n]*#9238 \/ #9336 \/ #9463 \/ #9467\)/)
 })
 
 test('read-only is named as a diagnostic and not as a repair, with the language mode it costs', async () => {
@@ -331,4 +333,47 @@ test('the token default DACL is carried as a candidate, with the asymmetry that 
   assert.match(body, /only mode whose default DACL\s+names a synthetic identity at all/)
   assert.match(body, /CANDIDATE and not an answer/)
   assert.match(body, /load-bearing for every piped grandchild spawn/)
+})
+
+test('the third producer carries a RULE, not one measurement (0.20.0)', async () => {
+  // #9467 measured the input instead of describing a symptom: varying only the
+  // third entry of the restricting list inside one host, the child died exactly
+  // when that entry was not an enabled group of the token — 16 of 16 arms. That
+  // is what lets the advisory stop at "this producer applies here, and no setting
+  // repairs it" instead of handing over a comparison and hoping. The rule, the
+  // reason it is structural, and the refused self-rescue are all facts the reader
+  // can act on, so all three have to survive into the rendered body.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'echo x' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /Since 0\.20\.0 there is a RULE/)
+  assert.match(body, /16 of 16 arms/)
+  assert.match(body, /NOT an enabled group of the token being restricted/)
+  assert.match(body, /DERIVED FROM A PATH/)
+  assert.match(body, /never an enabled group of any token/)
+  assert.match(body, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
+  assert.match(body, /#9467 measured all of this on\s+Windows 10 19044/)
+  // The claim the rule licenses — "no setting repairs it" — is what the reader is
+  // supposed to do with it, so it is asserted rather than left to the wording of
+  // one sentence: an advisory that measures the input and still implies a policy
+  // fix would be sending the reader to try settings again.
+  assert.match(body, /cannot be tuned away/)
+  assert.match(body, /which carries no such SID, starts it\s+and simply does not write/)
+})
+
+test('the runtime-load shape is named as scope and never claimed as this family (#9471)', async () => {
+  // #9471 filed a child that DOES start and then fails to load a library at
+  // runtime, carrying `E_ACCESSDENIED 0x80070005` and a message of its own. It is
+  // the shape this family is most likely to be mis-read as, so the advisory has to
+  // say out loud that it is not claimed — and it must NOT print that status next to
+  // its own, which would read as a recognition the classifier does not perform.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'echo x' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /a further shape this advisory does not\s+claim/)
+  assert.match(body, /it carries a message of its own \(`#9471`\)/)
+  assert.match(body, /confident wrong cause/)
+  // The status is quoted as a boundary, never as something this family matches.
+  assert.doesNotMatch(body, /0x80008082 STATUS_DLL_INIT_FAILED/)
+  assert.doesNotMatch(body, /E_ACCESSDENIED 0x80070005 STATUS_DLL_INIT_FAILED/)
 })
