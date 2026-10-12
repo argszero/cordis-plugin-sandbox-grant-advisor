@@ -133,6 +133,33 @@ export function failingTool(toolName, message) {
   }
 }
 
+/**
+ * One registrable tool whose body throws an `AggregateError`, as the producers do.
+ *
+ * The seventh family's producer is `AggregateError`: Node builds the thrown
+ * value's `message` from the argument the thrower passed, NOT from the members,
+ * and the runtime's own `errorMessage()` hands `.message` on — so the members are
+ * unreachable from the session even though they hold the Win32 code and the
+ * directory. This fixture reproduces exactly that: the members are real errors
+ * carrying the detailed text, and they must never appear in what the plugin read.
+ * @param toolName - the registered name.
+ * @param message - the aggregate sentence the producer passed.
+ * @param members - the inner errors the producer aggregated.
+ * @returns the tool definition.
+ */
+export function aggregateTool(toolName, message, members) {
+  return {
+    name: toolName,
+    description: 'aggregate-throwing integration fixture',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: { type: 'string' }, render: (_args, settled) => [{ type: 'text', text: settled }] },
+    execute: () => {
+      count(toolName)
+      return Promise.reject(new AggregateError(members, message))
+    },
+  }
+}
+
 /** One registrable tool whose body succeeds until told otherwise. */
 export function flakyTool(toolName, message) {
   const state = { fail: true }

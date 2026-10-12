@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import semver from 'semver'
 
-import { ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
+import { ACL_AGGREGATE_DISCUSSIONS, ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, WORKSPACE_DENIAL_DISCUSSIONS } from '../lib/advice.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
@@ -191,12 +191,12 @@ test('the shipped bundle patch describes the family the advice module covers, an
   for (const id of tracked) {
     assert.ok(patch.includes(id), `the bundle patch never names ${id}, which the advisories cover: the mount instructions describe a smaller family than the plugin`)
   }
-  // All six families, not only the first: the patch documents what the plugin
+  // All seven families, not only the first: the patch documents what the plugin
   // recognizes, and a family whose threads are missing from it is a family the
   // mount instructions do not admit exists. The last release that added threads
   // to the second and third families left this file behind for exactly that
   // reason — only the first list was wired to an assertion.
-  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS], ['the temp-root family', TEMP_ROOT_DISCUSSIONS], ['the CIM/WMI family', CIM_WMI_DISCUSSIONS]]) {
+  for (const [name, discussions] of [['the persistent-shell family', PTY_DISCUSSIONS], ['the native-init family', NATIVE_INIT_DISCUSSIONS], ['the workspace-denial family', WORKSPACE_DENIAL_DISCUSSIONS], ['the temp-root family', TEMP_ROOT_DISCUSSIONS], ['the CIM/WMI family', CIM_WMI_DISCUSSIONS], ['the aggregate-refusal family', ACL_AGGREGATE_DISCUSSIONS]]) {
     for (const id of discussions.match(/#\d+/g) ?? []) {
       assert.ok(patch.includes(id), `the bundle patch never names ${id} (${name}), which the advisories cover`)
     }
@@ -229,6 +229,17 @@ test('the shipped bundle patch describes the family the advice module covers, an
   assert.ok(/Get-PSDrive/.test(patch), 'the bundle patch does not name the silent wrong-value shape the sixth family warns about')
   assert.ok(/SilentlyContinue/.test(patch), 'the bundle patch does not name the error-suppression shape that turns a refusal into an empty result')
   assert.ok(/netstat -ano/.test(patch), 'the bundle patch does not hand over a measured native substitute')
+  // The seventh family's whole point is that the surfaced line cannot name a
+  // cause, so a mount instruction that presents the sentence as a diagnosis
+  // would teach the reader the opposite of what the text it loads says. The three
+  // things asserted here are the three the advisory is built on: what the line
+  // is (an `AggregateError` message), why that matters (the members are where the
+  // code and the directory are), and the candidate a listing settles before any
+  // privilege is involved (the per-path lock).
+  assert.ok(/AggregateError/.test(patch), 'the bundle patch does not say what the seventh family\'s line actually is')
+  assert.ok(/by construction/i.test(patch), 'the bundle patch does not say the missing code and directory are missing by construction rather than by accident')
+  assert.ok(/dsh-acl-locks/.test(patch), 'the bundle patch does not name the per-path lock directory, the one candidate a directory listing can settle')
+  assert.ok(/no ACL AT ALL/i.test(patch), 'the bundle patch does not say the lock candidate needs no ACL work, which is why it is ordered first')
 })
 
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {

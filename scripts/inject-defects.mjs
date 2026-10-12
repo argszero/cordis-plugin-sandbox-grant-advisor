@@ -270,7 +270,7 @@ const MUTATIONS = [
     name: 'the code is said to name its own direction, so too-few and too-many entries read alike',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one is producer 3\\'s mode',", "    'cannot tell you which mistake was made, but the status code already tells you it was too many, so producer 3\\'s mode',"]],
+    edits: [["    'cannot tell you which mistake was made. Only a comparison can, and the cheapest one starts with producer',", "    'cannot tell you which mistake was made, but the status code already tells you it was too many, so the cheapest one starts with producer',"]],
   },
   {
     // The cause the report's own control arm retires. Leaving it in place sends
@@ -346,7 +346,7 @@ const MUTATIONS = [
     name: 'the mount instructions drop the third family\'s newest threads',
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
-    edits: [['#8334, #8990, #8991, #9186):', '#8334):']],
+    edits: [['#8334, #8990, #8991, #9186, #9238, #9336):', '#8334):']],
   },
   {
     // Both of the fourth family's threads, not only the first: the family gained a
@@ -916,6 +916,169 @@ const MUTATIONS = [
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
     edits: [['measurements on one machine: `netstat -ano`', 'measurements on one machine: `netstat`']],
+  },  {
+    // The two sentences are different halves of the same backend, and the
+    // difference is what the reader acts on: the workspace half keeps its
+    // standing ACE and frees only SIDs, the temp half revokes and removes. A
+    // recognition that reports both as one half is a diagnosis of the wrong
+    // object.
+    name: 'the aggregate family reports the temp half as the workspace half',
+    file: 'src/signature.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "      return { family: 'acl-aggregate-failure', layer: 'temp', line: ACL_AGGREGATE_TEMP_SENTENCE }",
+      "      return { family: 'acl-aggregate-failure', layer: 'workspace', line: ACL_AGGREGATE_TEMP_SENTENCE }",
+    ]],
+  },
+  {
+    // The family exists because the line withholds its cause, so what it may
+    // match is the line itself. A substring match diagnoses any command that
+    // merely printed the sentence — including one whose sandbox is working.
+    name: 'the aggregate sentence is matched as a substring instead of as a whole line',
+    file: 'src/signature.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [['    if (sentence === ACL_AGGREGATE_TEMP_SENTENCE) {', '    if (sentence.includes(ACL_AGGREGATE_TEMP_SENTENCE)) {']],
+  },
+  {
+    // A line that also names the API and the code is the ACL family's, and being
+    // told that they are missing is the one reading this family must never give.
+    name: 'the aggregate family stops deferring to the signature that names the code',
+    file: 'src/signature.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [['  if (SIGNATURE.test(message)) return undefined', '  if (message.length < 0) return undefined']],
+  },
+  {
+    // The runtime renders a thrown error as `Error: <message>`; dropping the
+    // envelope tolerance leaves a reader who saw only that rendering blind.
+    name: 'the runtime error envelope is no longer tolerated on the aggregate sentence',
+    file: 'src/signature.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [["    const sentence = line.startsWith('Error: ') ? line.slice('Error: '.length) : line", '    const sentence = line']],
+  },
+  {
+    name: 'the aggregate advisory forks the wrong way — the temp half is described as the workspace half',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [["  const layer = failure.layer === 'temp'", "  const layer = failure.layer === 'workspace'"]],
+  },
+  {
+    // The pair is what makes the condition permanent: a retry cannot clear
+    // either half, and the reader has to know that before trying again.
+    name: 'the aggregate advisory stops saying the failure and its cleanup both threw',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '    is two throws: the grant failed, and then the fail-closed cleanup failed with it. What the cleanup',",
+      "    '    is one failure, and the command never started. What the cleanup',",
+    ]],
+  },
+  {
+    // The lock candidate leads the list for one reason: it is the only one that
+    // can produce this sentence without any ACL work at all.
+    name: 'the lock candidate stops being the one that needs no ACL work',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '  1. THE PER-PATH LOCK — and this one needs no ACL at all. Every grant and every revocation runs under an',",
+      "    '  1. THE PER-PATH LOCK. Every grant and every revocation runs under an',",
+    ]],
+  },
+  {
+    // Same lock, same mechanism: the grant and the cleanup that follows it both
+    // take it, which is why one broken lock root fails both.
+    name: 'the lock candidate loses the fact that the grant and its cleanup share the lock',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '     The grant and the revocation that follows it take the SAME lock, so a lock directory that cannot be',",
+      "    '     A lock directory that cannot be',",
+    ]],
+  },
+  {
+    // The listing is the probe: the line names no directory, so this is the half
+    // that makes the candidate settlable without privileges.
+    name: 'the lock candidate stops handing over the listing that settles it',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '     attempted. It is also the only candidate a reader can rule in or out with a directory listing:',",
+      "    '     attempted. A directory listing is worth a look:',",
+    ]],
+  },
+  {
+    // No directory is named by the line, so a grant would have to be aimed at a
+    // path the plugin does not know. Adding one is the mistake the whole family
+    // is built to avoid.
+    name: 'the aggregate advisory starts handing over a grant it cannot aim',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [["    '  takeown /F \"<root>\" /A',", "    '  icacls \"<root>\" /grant \"<account>:(OI)(CI)F\"',"]],
+  },
+  {
+    // #9460 inferred a capability probe from the config schema and said so; the
+    // source says there is none, and turning that back into a claim reinstates
+    // the reporter's inference as this plugin's finding.
+    name: 'the aggregate advisory reinstates the capability probe the source refutes',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    'One inference to discard if you are reasoning from the config schema: this backend has no capability',",
+      "    'One inference to keep if you are reasoning from the config schema: this backend probes capability',",
+    ]],
+  },
+  {
+    // The host line is where a maintainer learns what was recognized; losing the
+    // AggregateError account leaves a line that looks like a named diagnosis.
+    name: 'the aggregate host line stops saying the surfaced line is an AggregateError message',
+    file: 'src/index.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "      + 'surfaced line is an AggregateError message carrying neither the Win32 code nor the directory, so the code '",
+      "      + 'surfaced line names neither the Win32 code nor the directory, so the code '",
+    ]],
+  },
+  {
+    // Which half refused is the only thing the sentence carries, so a row that
+    // drops it tells the reader nothing they did not already have.
+    name: 'the aggregate notice row stops naming which half refused',
+    file: 'src/index.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    const half = failure.layer === 'temp' ? 'private temp capability' : 'standing workspace grant'",
+      "    const half = 'workspace grant'",
+    ]],
+  },
+  {
+    // EQUIVALENT MUTANT, recorded rather than hidden, and for the same reason the
+    // PTY family's is: the runtime derives an error result's rendered content from
+    // `error.message`, so the narrower read and the merged read agree and no
+    // fixture can separate them. Kept so the arm's silence is a fact on the
+    // record rather than an omission.
+    name: 'the aggregate family reads the merged text instead of `error.message`',
+    file: 'src/index.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    equivalent: 'the runtime derives error content from the message, so the two reads are indistinguishable from outside',
+    edits: [['?? classifyAclAggregateFailure(result.error.message)', '?? classifyAclAggregateFailure(failureText(result))']],
+  },
+  {
+    name: 'the aggregate family claims no advice, so every refused call re-delivers the page',
+    file: 'src/index.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      '      if (!claimAdvice(agent, previous, failure, key)) return undefined\n      ctx.logger.warn(aclAggregateHostLine(failure))',
+      '      ctx.logger.warn(aclAggregateHostLine(failure))',
+    ]],
+  },
+  {
+    // The mount instructions are published prose with no compiler over them, and
+    // this family's whole point is that the line is not a diagnosis.
+    name: 'the mount instructions stop saying the seventh family\'s line is an AggregateError message',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [[
+      '# That is an `AggregateError` message, and Node builds such a message from the',
+      '# That is how the failure is surfaced, and Node builds such a message from the',
+    ]],
   },
 ]
 

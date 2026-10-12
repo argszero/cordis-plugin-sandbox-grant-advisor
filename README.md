@@ -1,7 +1,7 @@
 # @argszero/cordis-plugin-sandbox-grant-advisor
 
 Turns a sandbox environment failure that has **no path forward** into a
-diagnosis the model — and the user reading the transcript — can act on. Six
+diagnosis the model — and the user reading the transcript — can act on. Seven
 signatures, one mechanism:
 
 ```
@@ -12,6 +12,8 @@ PTY shell exited during startup                             # persistent shell �
                                                             # denied INSIDE the workspace
 Windows ACL temp root must be outside the workspace: …      # the private temp root is inside the workspace
 0x80041003 (WBEM_E_ACCESS_DENIED) in the command's stderr   # CIM/WMI refused to the restricted token
+sandbox-local windows-acl temp grant materialization failed and its cleanup also failed
+                                                            # an ACL refusal that withholds its own cause
 ```
 
 **This plugin is the stopgap for "the error does not name the outstanding
@@ -19,7 +21,7 @@ condition".** It repairs nothing: no ACL is written, no privilege is requested,
 nothing is elevated, no environment variable is set for another process, no
 preset is installed and no mode is changed.
 
-## The six failures it recognizes
+## The seven failures it recognizes
 
 The first two are recognized on the public **`tools/post-execute`** waterfall
 (`@deepseek-ai/dsh-tools`) from the failure text. That seam is the one that has
@@ -30,9 +32,10 @@ channel that speaks to the model in the same step (`PostToolDecision`'s
 `additionalContexts`, which the agent loop turns into a durable user-role message
 — `packages/core/agent-loop/src/tool-calls.ts`). The third, fourth and sixth are
 recognized at the **same seam** from the canonical value of a result the pipeline
-calls a *success*, for reasons §3, §4 and §6 give in full. The fifth is read from
-a thrown error's own message like the second, and is the one family the plugin
-also reports **before** anything fails, for reasons §5 gives in full.
+calls a *success*, for reasons §3, §4 and §6 give in full. The fifth and the
+seventh are read from a thrown error's own message like the second; the fifth is
+the one family the plugin also reports **before** anything fails, for reasons §5
+gives in full.
 
 That seam, not `ctx.sandbox.confine`: `confine(argv, policy, signal)` sees the
 confinement failure too, but its signature carries no agent, so a wrapper could
@@ -1147,6 +1150,89 @@ network under the same restricted token), [#4163] and [#997] (Schannel TLS faili
 with `SEC_E_NO_CREDENTIALS`) and [#1847] (external processes dying with
 `0xC0000142`).
 
+### 7. An ACL refusal that withholds its own cause (`acl-aggregate-failure`, added in 0.19.0)
+
+[discussion #9460] reports the one failure in this plugin whose **line is the
+finding**, because the line is all there is:
+
+```
+sandbox-local windows-acl temp grant materialization failed and its cleanup also failed
+```
+
+That text is the `message` of an **`AggregateError`**, and Node builds such a
+message from the argument the thrower passed — *not* from its members. The
+producer (`packages/sandbox/sandbox-local/src/index.ts`) throws it when the
+Windows ACL backend's own fail-closed cleanup failed together with the grant that
+had just failed, so the members hold the inner failure and with it the Win32 code,
+the API name and the directory being edited — and none of that is in the text.
+The runtime hands the session `error.message` (`errorMessage()` in
+`packages/core/tools/src/index.ts`), so the code and the directory are
+**unreachable from the session by construction**, not by truncation.
+
+Every other family here names a cause. This one cannot, and the advisory does not
+invent one: it states what the line *is*, says what the line *does* say (that two
+throws happened — the grant and its cleanup), and then hands over candidates in
+the order a reader can separate them. Two sentences exist, one per half, and the
+difference is real rather than cosmetic: the **workspace** half is the standing
+root ACE, whose cleanup only frees the grant's SIDs (that ACE is the reuse cache
+and is kept on purpose), while the **temp** half is the per-session private
+capability, whose cleanup revokes the temp ACE and removes the private directory.
+
+**The candidate that leads needs no ACL at all.** Every grant and every revocation
+runs under one per-path lock, and the lock file is created *before* any security
+descriptor is read or written:
+
+```
+<GetTempPathW()>\dsh-acl-locks\<first 16 hex of sha256(lowercased path)>.lock
+```
+
+A lock root that cannot be created or opened fails the grant **and** its cleanup
+together, producing this exact sentence having attempted no ACL operation. It is
+also the only candidate a directory listing can settle — and the listing needs no
+privileges:
+
+```
+dir "<temp root>\dsh-acl-locks"
+```
+
+The lock file is opened with `OPEN_ALWAYS` and never deleted, so an absent or
+empty directory after a failure is itself the finding. Behind it come the
+documented prerequisite (missing `WRITE_OWNER`, and `WRITE_DAC` for a directory
+the caller does not own — a right on the **directory**, not `SeSecurityPrivilege`
+and not elevation) and the directory itself. The private `dsh-XXXXXX` directory is
+created *before* the grant, so a failed call leaves it behind — which is the trace
+to search for, and the reason a redirect that reached only one of the two temp
+roots (`os.tmpdir()` chooses the private directory, `GetTempPathW()` chooses
+`dsh-acl-locks`) can look like it did nothing.
+
+**It ships no repair command**, for the reason the standing-grant section ships
+none: the line names no directory, and a grant aimed at the wrong one is worse
+than none. What it hands over is the listing that names the directory, and then
+the backend's own `diagnose-windows-sandbox-acl` skill — with the version boundary
+that the skill arrives with the `0.2.0` line, so a `0.1.7` install should not go
+looking for it. It also names the two repairs [#9460] measured as **not** working,
+each with its reason: `takeown /A` moves ownership to Administrators, whose
+implicit rights are READ_CONTROL and WRITE_DAC and therefore not `WRITE_OWNER`;
+`icacls /reset /T /C` restores an inherited `Authenticated Users:(M)` entry that
+carries neither right.
+
+Finally, it discards an inference **the report itself made and labelled as one**:
+a visible `probeTimeoutMs` in the Config schema invites "the capability probe
+timed out". This backend has no capability probe — its Windows chain is a single
+rung selected without probing, and the grant path contains no probe at all — so no
+timer can produce this sentence, and the advisory says so rather than leaving a
+plausible wrong mechanism standing.
+
+It needs no platform gate, for the reason the first family needs none: the
+sentence names `sandbox-local windows-acl`, a producer only the Windows ACL backend
+can be. It also needs no mode gate, because the grant is materialized only on the
+session-scoped confining path — the sentence's presence already states the mode,
+and asking the resolver for a second opinion could only add a way to withhold
+advice the line already justifies.
+
+[#9460] is a Discussion (the repository has issues disabled), and the reply
+covering this family is posted there.
+
 ## What it does with a recognized failure
 
 1. **One durable advisory per agent, per family.** An agent that hits two
@@ -1225,7 +1311,7 @@ Mount it by adding the patch to your profile, or apply the shipped
         enforceAfter: 3
 ```
 
-`include` / `exclude` narrow **both** families: an untracked call is
+`include` / `exclude` narrow **every** family: an untracked call is
 transparent to the plugin entirely, so a watched-out shell call produces no PTY
 advisory (and no withholding note either — the configuration said "not our
 story", which is different from "we could not tell").
@@ -1270,7 +1356,7 @@ than one that stays silent.
   value the executor marked as a runner failure (`denied` is not set when the
   runner itself failed); a command naming a path outside the workspace; a command
   naming an outside path as well as an inside one; and a command naming only
-  relative paths — all six are refused, and the first three are the *sanctioned*
+  relative paths — all seven are refused, and the first three are the *sanctioned*
   outcomes rather than puzzles. The plugin reads the executors' own stamp rather
   than a sentence, so a command whose output contains `denied: true` is not this
   family either.
@@ -1282,14 +1368,19 @@ than one that stays silent.
 
 - **The Windows path itself cannot be witnessed on macOS**, where this plugin
   was built. What the test suite proves is the decision layer — classification
-  of all six families (the third from the producer's own canonical value,
+  of all seven families (the third from the producer's own canonical value,
   built by the suite with the reported `-1073741502` and the report's stderr
   line; the fourth from the executors' own stamp, built by the suite with the
   mode, the `denied` flag and the refusal dialect the executor matches; the fifth
   from the producer's own sentence with both operands, in both carrier spellings,
   plus the pre-flight containment computed on real directories; the sixth from
   the record #9272 pasted, in both display languages, with the silent shapes
-  asserted *not* to be recognized), the
+  asserted *not* to be recognized; the seventh from the producer's two
+  `AggregateError` sentences, thrown as **real** `AggregateError`s whose members
+  carry a Win32 line naming a real directory, with the layer kept and the member
+  text asserted **not** to reach the advisory, and with the more specific ACL
+  family asserted to win when the message also carries a `...NamedSecurityInfoW
+  failed` line), the
   once-per-agent-per-family rule, the sandbox-mode gate
   and its fail-closed behaviour, the fail-fast budget and its self-feeding
   guard, and the wiring to a real cordis `Context` and the real `ToolRuntime` —
@@ -1348,7 +1439,7 @@ than one that stays silent.
   outside the seam this plugin subscribes to. The report and its proposed fix
   stay with the maintainers; all this plugin can do is explain the provisioning
   failure that shares its root.
-- **The real fix is upstream, in all six families.** For the ACL failure,
+- **The real fix is upstream, in all seven families.** For the ACL failure,
   `grantWrite` already computes `hasExactGrant` / `hasExactDeny` /
   `hasExactLabel` and discards which one was false, so the diagnostic that turns
   a 52-minute detour into one line belongs at that site. For the PTY failure,
@@ -1371,7 +1462,16 @@ than one that stays silent.
   own lists, where the choice to leave Authenticated Users out is deliberate and
   priced (it is what closes the `C:\`-root tree-creation escape) — so the repair
   is not a wider grant but a measured statement of *which* check refuses the
-  namespace, which no one has produced. This plugin is the stopgap for all six.
+  namespace, which no one has produced. For the aggregate refusal the site is the
+  two `throw new AggregateError(...)` lines in `sandbox-local` themselves: the
+  members already hold exactly what the reader needs — the Win32 code, the API
+  name, the directory — and the defect is that Node's `AggregateError.message`
+  is built from the thrower's argument, so none of it reaches a line the session
+  can read. The repair is not a better sentence at that site but a carrier: quote
+  the first member's message into the thrown text (or attach the members to the
+  result the pipeline renders), so the 52-minute question "which directory, which
+  right" is answered by the failure instead of by a listing. This plugin is the
+  stopgap for all seven.
 
 ## Compatibility
 
@@ -1405,7 +1505,8 @@ the newest of that line.
 The whole set is re-probed whenever this package's source changes rather than
 carried over from an earlier version: the range is a claim about *this* build of
 the plugin, so `0.7.1` re-ran all five lines above, `0.9.0` re-ran them again,
-`0.16.0` re-ran them a third time, `0.17.0` a fourth and `0.18.0` a fifth — all
+`0.16.0` re-ran them a third time, `0.17.0` a fourth, `0.18.0` a fifth and
+`0.19.0` a sixth — all
 five `PASS` each time. A
 line whose probe fails is removed from the range rather than left claimed. The
 scratch tree's resolved versions are the ones to read back when a probe is quoted
@@ -1505,6 +1606,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#9238]: https://github.com/deepseek-ai/deepseek-harness/discussions/9238
 [#9336]: https://github.com/deepseek-ai/deepseek-harness/discussions/9336
 [#9272]: https://github.com/deepseek-ai/deepseek-harness/discussions/9272
+[#9460]: https://github.com/deepseek-ai/deepseek-harness/discussions/9460
 [#1157]: https://github.com/deepseek-ai/deepseek-harness/discussions/1157
 [#4163]: https://github.com/deepseek-ai/deepseek-harness/discussions/4163
 [#997]: https://github.com/deepseek-ai/deepseek-harness/discussions/997

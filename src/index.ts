@@ -2,7 +2,7 @@
  * `sandbox-grant-advisor`: turn an environment failure that has no path forward
  * into a diagnosis the model — and the user reading the transcript — can act on.
  *
- * ## The six failures it recognizes
+ * ## The seven failures it recognizes
  *
  * **Workspace provisioning (Windows ACL).** Four reports of one signature
  * (`#7538`, `#7622`, `#7646`, `#7720`) describe the same shape: the host-side write grant
@@ -301,6 +301,28 @@
  * advisory quotes upstream's sentence as the authority and says what it adds,
  * rather than presenting a documented boundary as a discovery.
  *
+ * **A refusal that withholds its own cause (the ACL `AggregateError` wrapper,
+ * `#9460`).** The seventh family is the only one whose *line* is the finding: it
+ * is the message of an `AggregateError` thrown when the Windows ACL backend's
+ * own fail-closed cleanup failed with the grant that had just failed. Node
+ * builds that message from the argument the thrower passed, **not** from its
+ * members, so the inner failure — the Win32 code, the API name, and the
+ * directory being edited — is nowhere in the text; it is in `errors`, which
+ * nothing on the model's side reads. The account in `#9460` is exactly that
+ * shape, and so is the reporter's inference from the Config schema: a visible
+ * `probeTimeoutMs` invited "the probe timed out", but this backend's Windows
+ * chain is a single rung selected without probing and its grant path contains no
+ * probe at all, so no timer can produce the sentence. The mechanism a reader
+ * *can* rule in or out needs no ACL work whatsoever and is named FIRST in the
+ * advisory: every grant and every revocation runs under one per-path lock whose
+ * file is created before any security descriptor is touched, so a lock root that
+ * cannot be created fails the grant **and** its cleanup together and yields this
+ * exact sentence having attempted no ACL operation. Because the line names
+ * neither the code nor the directory, the advisory ships no grant command — one
+ * aimed at the wrong directory is worse than none — and hands over the listing
+ * that names the directory instead, then the backend's own repair skill, with
+ * the version boundary that introduced it.
+ *
  * @module @argszero/cordis-plugin-sandbox-grant-advisor
  */
 
@@ -310,9 +332,10 @@ import { boundContextSummary, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, PreToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { tmpdir } from 'node:os'
-import { advisoryText, ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, tempRootPreflightAdvisory, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
+import { advisoryText, ACL_AGGREGATE_DISCUSSIONS, ACL_DISCUSSIONS, CIM_WMI_DISCUSSIONS, denialText, DISCUSSIONS_OF, NATIVE_INIT_DISCUSSIONS, PTY_DISCUSSIONS, TEMP_ROOT_DISCUSSIONS, tempRootPreflightAdvisory, WORKSPACE_DENIAL_DISCUSSIONS } from './advice.js'
 import type { AdvisoryContext } from './advice.js'
 import {
+  classifyAclAggregateFailure,
   classifyCimDenial,
   classifyNativeInitDeath,
   classifyProvisioningFailure,
@@ -323,6 +346,7 @@ import {
   hasWorkspaceDenialStamp,
 } from './signature.js'
 import type {
+  AclAggregateFailure,
   CimDenialFailure,
   FailureFamily,
   NativeInitFailure,
@@ -585,6 +609,10 @@ function summaryOf(failure: RecognizedFailure, mode?: SandboxModeName): string {
   if (failure.family === 'cim-wmi-denial') {
     return `CIM/WMI unavailable to the sandbox token (0x80041003) under sandbox mode "${String(mode)}"`
   }
+  if (failure.family === 'acl-aggregate-failure') {
+    const half = failure.layer === 'temp' ? 'private temp capability' : 'standing workspace grant'
+    return `ACL grant refused (${half}) and its cleanup failed — no code, no path in the line`
+  }
   return `workspace ACL provisioning failed (Win32 ${String(failure.win32Code)})`
 }
 
@@ -711,7 +739,7 @@ export function apply(ctx: Context, config: Config = {}): void {
    * told — the failure it just hit, or the standing condition this session is
    * already in.
    *
-   * The order is not arbitrary. A call that really is one of the six failures
+   * The order is not arbitrary. A call that really is one of the seven failures
    * carries the producer's own line, which the pre-flight report cannot have, so
    * the failures are asked first and the standing check speaks only on a call
    * that produced no diagnosis at all. In a session the standing condition is
@@ -736,7 +764,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
 
   /**
-   * Classify one settled call against the six failure families.
+   * Classify one settled call against the seven failure families.
    *
    * Everything here is driven by the settled result, and every branch that
    * recognizes one of them claims the family's once-per-agent advisory for this
@@ -796,6 +824,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     // plugin tell a working session that its shell is dead, or that its sandbox
     // cannot start.
     //
+    // The aggregate-refusal family is read from `error.message` alone for that
+    // last reason: it is a fixed sentence, so any text that merely quotes it is
+    // not the throw. It sits AFTER the ACL signature on purpose — that family is
+    // the more specific one (it names the API, the code and usually the
+    // directory), and the aggregate family's own classifier refuses a message
+    // that carries those, so a line that has both is never told they are missing.
+    //
     // Honest about the limit: with the current `dsh-tools` runtime the rendered
     // content of an error result is derived from `error.message`, so today the
     // reads agree and the choice is not observable from outside — an injection
@@ -805,6 +840,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     // rely on: a tool whose `render` produces output of its own is exactly the
     // case the narrower rule exists for.
     const failure = classifyProvisioningFailure(failureText(result))
+      ?? classifyAclAggregateFailure(result.error.message)
       ?? classifyPtyStartupFailure(result.error.message)
       ?? classifyTempRootRefusal(result.error.message)
     if (failure === undefined) return undefined
@@ -818,10 +854,38 @@ export function apply(ctx: Context, config: Config = {}): void {
       ctx.logger.warn(tempRootHostLine(failure))
       return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
     }
+    if (failure.family === 'acl-aggregate-failure') {
+      // No gate either, and for a third reason: the grant is only materialized
+      // on the session-scoped confining path, so the producer's sentence cannot
+      // be reached from a mode this family would have to refuse — asking the
+      // policy resolver for the mode could only add a way to withhold advice the
+      // line already justifies.
+      if (!claimAdvice(agent, previous, failure, key)) return undefined
+      ctx.logger.warn(aclAggregateHostLine(failure))
+      return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
+    }
 
     if (!claimAdvice(agent, previous, failure, key)) return undefined
     ctx.logger.warn(aclHostLine(failure))
     return notice(advisoryText(failure, advisoryContext(exec.name)), summaryOf(failure))
+  }
+
+  /**
+   * The one-line host-side account of an ACL grant whose rollback failed with it.
+   *
+   * The layer is printed because it is the only thing the producer's sentence
+   * carries, and because it is the fact a maintainer needs to know that a
+   * reporter cannot see: the workspace half failing means the temp capability was
+   * never created, while the temp half failing means the standing root grant was
+   * already in place.
+   * @param failure - the recognized failure.
+   * @returns a single log line.
+   */
+  function aclAggregateHostLine(failure: AclAggregateFailure): string {
+    const half = failure.layer === 'temp' ? 'the private temp capability' : 'the standing workspace-root grant'
+    return `sandbox-grant-advisor: ACL provisioning refused ${half} and its cleanup failed with it — the `
+      + 'surfaced line is an AggregateError message carrying neither the Win32 code nor the directory, so the code '
+      + `lives in the error's own members; advisory delivered to the model (discussion ${ACL_AGGREGATE_DISCUSSIONS})`
   }
 
   /**

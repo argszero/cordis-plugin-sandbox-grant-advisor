@@ -373,6 +373,11 @@ export type FailureFamily =
   | 'temp-root-inside-workspace'
   /** CIM/WMI was refused to a confined Windows command's restricted token. */
   | 'cim-wmi-denial'
+  /**
+   * An ACL write grant was refused AND its rollback failed, which the producer
+   * surfaces as one sentence carrying neither.
+   */
+  | 'acl-aggregate-failure'
 
 /** One recognized provisioning failure, with the producer's own fields kept. */
 export interface ProvisioningFailure {
@@ -496,6 +501,7 @@ export type RecognizedFailure =
   | WorkspaceDenialFailure
   | TempRootFailure
   | CimDenialFailure
+  | AclAggregateFailure
 
 /**
  * The assertion's own words, kept as a constant so nothing can drift.
@@ -616,6 +622,66 @@ export interface CimDenialFailure {
   /** The command's exit status, or `null` when the tool reported none. */
   readonly exitCode: number | null
 }
+
+/**
+ * Which of the backend's two grants the aggregate refusal is about.
+ *
+ * The producer spells this out in its own sentence, and the distinction is not
+ * cosmetic — the two halves are materialized at different times and only one of
+ * them is reached in a given call. The workspace-root grant is the STANDING,
+ * once-per-workspace ACE for `workspaceWriteSid`; the temp capability is the
+ * REVOCABLE private directory for `tempWriteSid`, created per live
+ * session/workspace pair. A refusal on the temp half therefore also says
+ * something about the other one: the workspace grant either applied or was already
+ * cached, or the call would have failed there first.
+ */
+export type AclAggregateLayer =
+  /** The standing workspace-root grant (`writeSid`). */
+  | 'workspace'
+  /** The revocable private temp capability (`tempWriteSid`). */
+  | 'temp'
+
+/**
+ * The ACL grant that failed AND whose rollback failed, as the producer surfaces it.
+ *
+ * The producer throws an `AggregateError` whose message is one of
+ * {@link ACL_AGGREGATE_WORKSPACE_SENTENCE} / {@link ACL_AGGREGATE_TEMP_SENTENCE},
+ * and `AggregateError.message` does not contain its members: the inner failure
+ * (and with it the Win32 code and the directory being edited) lives in
+ * `errors`. So this failure is recognized for what the line *is* — an opaque
+ * refusal to provision the sandbox — rather than for a cause, and the advisory
+ * says so instead of inventing the cause the line withheld. Nothing but the
+ * layer is kept, because nothing else is in the text.
+ */
+export interface AclAggregateFailure {
+  /** Which family this failure belongs to. */
+  readonly family: 'acl-aggregate-failure'
+  /** Which of the two grants the producer's own sentence names. */
+  readonly layer: AclAggregateLayer
+  /** The producer's whole line, kept verbatim so nothing can drift. */
+  readonly line: string
+}
+
+/**
+ * The standing workspace grant's aggregate sentence, verbatim.
+ *
+ * `packages/sandbox/sandbox-local/src/index.ts`, the `catch` where
+ * `AclWriteGrant.add(workspaceRoot, true)` is disposed after it threw. Kept here
+ * so a test can pin the producer's own spelling rather than a copy of it, and so
+ * the two layers cannot be confused for one another: the second sentence is the
+ * temp capability's.
+ */
+export const ACL_AGGREGATE_WORKSPACE_SENTENCE = 'sandbox-local windows-acl workspace grant failed and its cleanup also failed'
+
+/**
+ * The private temp capability's aggregate sentence, verbatim.
+ *
+ * The same file's `materializeAclGrant`, where the temp directory's grant failed
+ * and then both halves of the fail-closed path — `grant.dispose()` (a revocation
+ * that takes the same per-path lock the grant did) and `removeTempDir` — failed
+ * with it. This is the sentence `#9460` reports.
+ */
+export const ACL_AGGREGATE_TEMP_SENTENCE = 'sandbox-local windows-acl temp grant materialization failed and its cleanup also failed'
 
 /**
  * The producer's sentence plus its two operands.
@@ -752,6 +818,12 @@ export function failureLine(failure: RecognizedFailure): string {
     // adds is the identification of the code, so that is what is printed.
     const status = failure.exitCode === null ? '' : `[exit code: ${String(failure.exitCode)}] `
     return `${status}WBEM_E_ACCESS_DENIED (${WBEM_ACCESS_DENIED_TOKEN}) in the command's own stderr`
+  }
+  if (failure.family === 'acl-aggregate-failure') {
+    // The producer's own line, whole: this family's entire premise is that the
+    // line is all the model has — no API, no code, no path — so re-deriving a
+    // shorter form here would be the one thing that could misrepresent it.
+    return failure.line
   }
   const suffix = failure.detail.length === 0 ? '' : `: ${failure.detail}`
   return `${failure.api} failed (Win32 ${failure.win32Code})${suffix}`
@@ -955,4 +1027,57 @@ export function classifyCimDenial(value: unknown, facts: CimDenialFacts): CimDen
   const probe = value as { exitCode?: unknown }
   const exitCode = typeof probe.exitCode === 'number' && Number.isInteger(probe.exitCode) ? probe.exitCode : null
   return { family: 'cim-wmi-denial', exitCode }
+}
+
+/**
+ * Classify one failure message as an ACL grant whose rollback failed with it.
+ *
+ * Recognition is by **whole line**, like the persistent-shell family and for the
+ * same reason: the producer's message is a bare sentence with no fields, so a
+ * longer line that merely contains it is something quoting it — a transcript, a
+ * log the failing command printed, a pasted report — and advising about the
+ * sandbox there would be advice about the wrong thing. The `Error: ` envelope a
+ * tool result adds in front of the message is the one prefix accepted, because
+ * that one is the runtime's own.
+ *
+ * Two refusals are built in, and both are about staying the *less* specific
+ * family:
+ *
+ * 1. A message that also carries `(Set|Get)NamedSecurityInfoW failed (Win32 N)`
+ *    is {@link classifyProvisioningFailure}'s — that line names the API, the code
+ *    and usually the directory, and this family's whole reason for existing is
+ *    that those three are absent. If they are present, the reader is owed the
+ *    other diagnosis, not this one.
+ * 2. A line that is neither producer sentence is not this family. The backend
+ *    has more than these two aggregate throws, and a future one is a sentence
+ *    this plugin has not read: refusing it is fail-closed (no advice), which is
+ *    the honest direction. The sentences are matched verbatim rather than by a
+ *    loose pattern on `windows-acl` + `failed`, because such a pattern would also
+ *    claim the runner's own `windows-acl-run: … failed` lines, which are a
+ *    different condition entirely (a runner that refused its profile before
+ *    spawning).
+ *
+ * There is no platform gate, for the reason the ACL family's first signature has
+ * none either: the sentence names `sandbox-local windows-acl`, a producer only
+ * the Windows ACL backend can be. The value-read families need the gate because
+ * their discriminators (`denied: true`, `0x80041003`) are shapes another
+ * platform can produce.
+ * @param message - the failure text, read from the error's own `message`.
+ * @returns the recognized failure, or undefined when this is not one.
+ */
+export function classifyAclAggregateFailure(message: string): AclAggregateFailure | undefined {
+  // The more specific family wins even here, so a message that carries the API
+  // and the code is never told that they are missing.
+  if (SIGNATURE.test(message)) return undefined
+  for (const raw of message.split('\n')) {
+    const line = raw.trim()
+    const sentence = line.startsWith('Error: ') ? line.slice('Error: '.length) : line
+    if (sentence === ACL_AGGREGATE_WORKSPACE_SENTENCE) {
+      return { family: 'acl-aggregate-failure', layer: 'workspace', line: ACL_AGGREGATE_WORKSPACE_SENTENCE }
+    }
+    if (sentence === ACL_AGGREGATE_TEMP_SENTENCE) {
+      return { family: 'acl-aggregate-failure', layer: 'temp', line: ACL_AGGREGATE_TEMP_SENTENCE }
+    }
+  }
+  return undefined
 }

@@ -3,7 +3,7 @@
  * environment failure, and what is deliberately withheld.
  *
  * The text is assembled here as pure functions so every sentence can be pinned
- * by a test, one family at a time. The six families are shaped by the same
+ * by a test, one family at a time. The seven families are shaped by the same
  * question — is this the sandbox's doing, and what can the reader do about it —
  * and they answer it differently:
  *
@@ -227,6 +227,23 @@
  *   quotes upstream's own sentence for the mechanism and declines to price a
  *   narrower fix from its own evidence.
  *
+ * - **The self-withholding refusal** (`acl-aggregate-failure`, #9460) is the
+ *   seventh and the only family whose *line* is the finding rather than a clue to
+ *   it. The producer throws an `AggregateError` when the fail-closed cleanup fails
+ *   with the grant that had just failed, and Node's message comes from the
+ *   argument the thrower passed rather than from `errors`, so the Win32 code, the
+ *   API name and the directory are absent by construction. Its advisory therefore
+ *   names **no cause**: it says which half refused, gives the candidates in the
+ *   order a probe can separate them, and puts the one that needs no ACL at all —
+ *   the per-path lock both the grant and its cleanup take, whose file is created
+ *   before any descriptor is read — first, because it is also the only candidate a
+ *   directory listing can rule out. It ships **no repair command** on purpose: the
+ *   ACL family can hand over a grant because its line names the directory, and
+ *   nothing here does, so what is handed over is the probe that names it. This is
+ *   also the family whose `layer` discriminator exists because the producer has
+ *   two sentences and the difference is real — the workspace half keeps its
+ *   standing ACE and frees only SIDs, the temp half revokes and removes.
+ *
  * Both give a **discriminator, not just a remedy**: applying a fix without
  * confirming the cause teaches nothing when the fix does not work. For the ACL
  * family that is `icacls <dir>`, looking for an ACE that names the caller's own
@@ -262,7 +279,7 @@
  * @module
  */
 
-import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, TempRootFailure, WorkspaceDenialFailure, CimDenialFailure, RecognizedFailure } from './signature.js'
+import type { FailureFamily, ProvisioningFailure, PtyStartupFailure, NativeInitFailure, TempRootFailure, WorkspaceDenialFailure, CimDenialFailure, AclAggregateFailure, RecognizedFailure } from './signature.js'
 import { failureLine, STATUS_DLL_INIT_FAILED } from './signature.js'
 import type { SandboxModeName } from './mode.js'
 
@@ -379,6 +396,22 @@ export const TEMP_ROOT_DISCUSSIONS = '#9175'
 export const CIM_WMI_DISCUSSIONS = '#1157 / #4163 / #997 / #1847 / #9272'
 
 /**
+ * The upstream thread the aggregate-refusal advisory is a stopgap for.
+ *
+ * One report, `#9460`, and it is enough to carry the whole family because the
+ * reporter measured the part that cannot be reasoned about from a source tree:
+ * the two repairs that do not work (`takeown /A`, `icacls /reset /T`), the manual
+ * ACL operation that DOES work when run by hand, and — the datum the advisory's
+ * probe is built on — that a temp root redirected to an ASCII path afterwards
+ * stayed completely empty, which is only possible if the running process never
+ * resolved temp to it. The thread also demonstrates why the sentence needs a
+ * family of its own: both the reporter and the first readers of the source
+ * reached for mechanisms (a capability probe, an ACL refusal) that the backend
+ * does not have or cannot be shown to have.
+ */
+export const ACL_AGGREGATE_DISCUSSIONS = '#9460'
+
+/**
  * The thread list each family's withholding note cites.
  *
  * A withheld recognition is a decision the host log has to account for, and the
@@ -396,6 +429,7 @@ export const DISCUSSIONS_OF: Record<FailureFamily, string> = {
   'workspace-denial': WORKSPACE_DENIAL_DISCUSSIONS,
   'temp-root-inside-workspace': TEMP_ROOT_DISCUSSIONS,
   'cim-wmi-denial': CIM_WMI_DISCUSSIONS,
+  'acl-aggregate-failure': ACL_AGGREGATE_DISCUSSIONS,
 }
 
 /** The documented prerequisite, quoted from the backend's README. */
@@ -787,6 +821,15 @@ export function advisoryText(failure: RecognizedFailure, context: AdvisoryContex
       throw new Error('sandbox-grant-advisor: the CIM/WMI advisory requires the resolved sandbox mode')
     }
     return cimWmiAdvisory(failure, context.mode, context.href)
+  }
+  // No mode is required here, unlike the three mode-gated families: the producer
+  // is reached only from the session-scoped `workspace-write` path (a read-only
+  // call passes the ambient temp root and never materializes a grant), so the
+  // presence of this sentence already states the mode, and asking the policy
+  // resolver for a second opinion could only introduce a way to withhold advice
+  // the line already justifies.
+  if (failure.family === 'acl-aggregate-failure') {
+    return aclAggregateAdvisory(failure, context.tool, context.href)
   }
   return aclAdvisory(failure, context.href)
 }
@@ -1707,6 +1750,153 @@ function cimWmiAdvisory(failure: CimDenialFailure, mode: SandboxModeName, href?:
     '',
     'This is a stopgap, ' + where + '. What it is NOT: this plugin neither grants anything nor widens the',
     'sandbox — the substitutes above are yours to run, and your file tools are unaffected.',
+  ].join('\n')
+}
+
+/**
+ * Build the advisory for an ACL grant whose rollback failed with it.
+ *
+ * The whole difficulty of this family is that the producer's line is an
+ * `AggregateError` message, and Node builds that message from the argument the
+ * thrower passed rather than from its members — so the Win32 code, the API name
+ * and the directory being edited are all absent, and a reader has no way to tell
+ * "the ACL was refused" from "the ACL was never attempted". This text therefore
+ * does not name a cause. It states what the line does say (which half refused),
+ * then hands over the candidates in the order a probe can separate them, and it
+ * puts the one candidate that needs no ACL at all FIRST — the per-path lock,
+ * which the grant and its rollback both take, and which fails both together when
+ * the lock directory cannot be created.
+ *
+ * It ships NO repair command, and that is a decision rather than an omission: the
+ * ACL family can hand over `icacls ... :(OI)(CI)(WO)` because its line names the
+ * directory and the right, while nothing here names the directory, and a grant
+ * aimed at the wrong one is worse than none. What it hands over instead is the
+ * probe that names the directory, and the backend's own repair skill, which is
+ * the thing that reads a path and repairs it after verifying each change.
+ * @param failure - the recognized failure.
+ * @param tool - the tool whose call failed, quoted back so the advice is about it.
+ * @param href - optional URL shown for the upstream thread.
+ * @returns the user-role notice text.
+ */
+function aclAggregateAdvisory(failure: AclAggregateFailure, tool?: string, href?: string): string {
+  const where = href === undefined
+    ? `tracked upstream (discussion ${ACL_AGGREGATE_DISCUSSIONS})`
+    : `tracked upstream: ${href}`
+  const call = tool === undefined ? 'This command' : `The \`${tool}\` command`
+  const layer = failure.layer === 'temp'
+    ? [
+        'This is the TEMP half: the private capability directory the backend creates per live session/workspace',
+        'pair. The workspace-root grant is a SEPARATE throw with its own sentence, so the standing root ACE',
+        'either applied or was already cached — the refusal is about the per-session directory.',
+      ]
+    : [
+        'This is the WORKSPACE half: the standing root ACE itself. The temp capability is materialized after it,',
+        'so this refusal means the temp directory was never created at all.',
+      ]
+  return [
+    'Sandbox provisioning failed — no sandboxed command can run in this workspace until it is fixed. The',
+    'failure is the sandbox declining to set up its own capabilities, so nothing the command could have done',
+    `is involved and there is no result it produced. ${call} never started.`,
+    '',
+    'What was reported:',
+    `  ${failureLine(failure)}`,
+    '',
+    'Read that line for what it is: an `AggregateError` message. Node builds that message from the argument',
+    'the thrower passed and NOT from its members, so the inner failure — and with it the Win32 code, the API',
+    'name and the directory being edited — is not in the text at all. It is in `errors` (and on the raw',
+    'stack). Everything below separates what the line does say from the candidates it cannot.',
+    '',
+    'What the line DOES say, and it is two things:',
+    `  ${failureLine(failure)}`,
+    '    is two throws: the grant failed, and then the fail-closed cleanup failed with it. What the cleanup',
+    "    is depends on the half, and both halves take the same per-path lock: the temp sentence\'s cleanup",
+    "    revokes that temp ACE and removes the private directory, while the workspace sentence\'s cleanup only",
+    '    frees the grant SIDs — its root ACE is the reuse cache and is kept on purpose. Either way the same',
+    '    object refused the write AND its cleanup, which is what makes this condition non-transient: retrying',
+    '    the same command cannot clear it, and neither can a different, more harmless command.',
+    ...layer,
+    '',
+    'Candidates, in the order a probe can separate them. They are candidates and not findings because the code',
+    'that would decide between them is exactly what the line withheld.',
+    '',
+    '  1. THE PER-PATH LOCK — and this one needs no ACL at all. Every grant and every revocation runs under an',
+    '     exclusive lock whose file is created BEFORE any security descriptor is read or written:',
+    '       <the temp root the Win32 API reports>\\dsh-acl-locks\\<first 16 hex of sha256(lowercased path)>.lock',
+    '     The grant and the revocation that follows it take the SAME lock, so a lock directory that cannot be',
+    '     created or opened fails both and produces this exact sentence with no ACL operation having been',
+    '     attempted. It is also the only candidate a reader can rule in or out with a directory listing:',
+    '       dir "<temp root>\\dsh-acl-locks"',
+    '     The lock file is opened with OPEN_ALWAYS and never deleted, so every path this backend has ever',
+    '     granted has a file here. An absent or empty directory after a failure is itself the finding.',
+    '',
+    '  2. THE GRANT WAS REFUSED, and the revocation of the same directory then failed for the same reason:',
+    '     missing `WRITE_OWNER` (and, for a directory the caller does not own, `WRITE_DAC`) on the directory',
+    '     being edited. That is the documented prerequisite of this backend, and it is a right on the',
+    '     DIRECTORY rather than `SeSecurityPrivilege` or elevation. It is worth noting what this candidate',
+    '     predicts and what it does not: it predicts `icacls "<dir>"` showing no ACE naming your own account',
+    '     with (F) or (WO), so the check for it is a read, not a grant.',
+    '',
+    '  3. THE DIRECTORY — the private directory exists by the time the grant runs (it is created first), so',
+    '     this candidate is about the ACE not applying to it rather than about its creation: a volume with no',
+    '     ACL or integrity-label support, a path that is not a directory, or a security descriptor that cannot',
+    '     grow. Note one trap when reading the cleanup half: a removal that failed may be a CONSEQUENCE rather',
+    '     than a second fault — a grant that threw while holding the directory can leave it open, and a plain',
+    '     delete of an open directory fails. So a failing removal is not by itself independent evidence.',
+    '',
+    'TWO TEMP ROOTS, NOT ONE — and this is where a redirect can look like it did nothing. This one call',
+    'resolves temp twice, through two different mechanisms that can disagree:',
+    '  - `os.tmpdir()` (Node) chooses the private capability directory, named `dsh-XXXXXX`;',
+    '  - `GetTempPathW()` (the Win32 call the lock path uses) chooses `dsh-acl-locks`, and it reads `%TMP%`,',
+    '    then `%TEMP%`, then `%USERPROFILE%` — so a redirect that reaches only one of the two processes',
+    '    involved, or only one of the two variables, moves one of these and not the other.',
+    'That gives one decisive probe: the private `dsh-XXXXXX` directory is created BEFORE any ACL work, and',
+    'its removal is exactly what also failed — so after a failing call it is STILL THERE. Search both temp',
+    'roots for it and for `dsh-acl-locks`, then read the owner and the ACL of whatever you find:',
+    '  PowerShell:  Get-ChildItem -Force "<root>" -Filter dsh-* | Select-Object -ExpandProperty FullName',
+    '  cmd:         dir /a /b "<root>\\dsh-*"',
+    'If a root you redirected to holds neither, the running process never resolved temp to it, and the',
+    'directory that failed is under the OTHER root — which is why repairing the redirected one changes',
+    'nothing.',
+    '',
+    "THE REPAIR IS THE BACKEND'S OWN, and it must be aimed at the path this probe names. `sandbox-windows-acl`",
+    'ships and registers a `diagnose-windows-sandbox-acl` skill: it reads the requested path and every',
+    "ancestor, adds the signed-in user's Full-control allow ACE where effective `WRITE_DAC`/`WRITE_OWNER` is",
+    'missing, verifies every change by re-reading it, backs up each changed DACL, preserves denies, owner,',
+    'inheritance and the SACL, refuses reparse points, and restores its own attempted changes in reverse order',
+    'if a repair fails. It needs ONE unconfined call: a confined child cannot read or write the security',
+    'descriptors it works on, so escalate that call in the session.',
+    'Note the version boundary: that skill arrives with the 0.2.0 line. On a 0.1.7 install the registration',
+    'symbol does not exist anywhere in the package, so "the README promised a skill" is not a reason to look',
+    'for one there.',
+    '',
+    'WHAT DOES NOT HELP, and this report is where both were tried:',
+    '  takeown /F "<root>" /A',
+    '    moves OWNERSHIP to Administrators, and owner-implicit rights are READ_CONTROL and WRITE_DAC only.',
+    "    This backend's prerequisite is that the CALLING account holds `WRITE_DAC`/`WRITE_OWNER`, so a grant",
+    '    that needs `WRITE_OWNER` is not helped by it — and a UAC-filtered Administrators membership',
+    '    contributes deny-only SIDs, so the new owner may not be the caller in the first place.',
+    '  icacls "<root>" /reset /T /C',
+    '    restores inheritance, and the inherited `Authenticated Users:(M)` entry an ordinary workspace gets',
+    '    does not carry `WRITE_DAC` or `WRITE_OWNER` (Modify is Full control minus change-permissions and',
+    '    change-owner). Where the reset strips the last entry naming you, the directory ends up in exactly the',
+    '    condition candidate 2 describes: writable-looking, and short both rights.',
+    '  Widening the sandbox mode',
+    '    is a way to CONFIRM the diagnosis (the same command passes under `danger-full-access`, where nothing',
+    '    is spawned through the sandbox at all), not a fix — the environment is still broken for every',
+    '    confined session afterwards.',
+    '',
+    'One inference to discard if you are reasoning from the config schema: this backend has no capability',
+    'probe. Its Windows chain is a single rung, selected without probing, and the grant path contains no probe',
+    'at all — so `probeTimeoutMs` never applies to it, and this failure is a thrown error rather than a',
+    'timed-out verdict.',
+    '',
+    'How to read this: the backend documents provisioning prerequisites and the harness does not surface the',
+    'inner error, so the diagnosis is delivered here instead. This is a stopgap, ' + where + '.',
+    'It arrives through the session rather than through a shell, which is the thing this failure has just',
+    'taken away — the reason a repair script cannot be the answer at the moment it is needed.',
+    'What it is NOT: this plugin neither edits ACLs nor elevates, and it ships no grant command here, because',
+    'nothing in the line names the directory one would have to be aimed at.',
+    'Your file read/write tools still work; only sandboxed command execution is blocked.',
   ].join('\n')
 }
 

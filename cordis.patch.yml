@@ -331,6 +331,58 @@
 # measured which of the token's checks refuses the namespace, so the advisory
 # declines to price a narrower fix and says so.
 
+# A SEVENTH family is the one whose LINE is the finding (#9460): the Windows ACL
+# backend's fail-closed cleanup failed together with the grant that had just
+# failed, and it surfaces the pair as
+#
+#   sandbox-local windows-acl temp grant materialization failed and its cleanup also failed
+#
+# That is an `AggregateError` message, and Node builds such a message from the
+# argument the thrower passed rather than from the members — so the Win32 code,
+# the API name and the directory being edited are ABSENT BY CONSTRUCTION. They
+# live in `errors` (and on the raw stack), which nothing on the model's side
+# reads. Every other family here names a cause; this one cannot, and it does not
+# invent one. The backend throws two sentences, one per half: the standing
+# workspace-root grant (whose cleanup only frees the grant SIDs — its ACE is the
+# reuse cache and is kept on purpose) and the per-session private temp capability
+# (whose cleanup revokes the temp ACE and removes the private directory).
+#
+# What the advisory adds is the set of candidates, ordered by how a reader can
+# separate them, with the one that needs NO ACL AT ALL first: every grant and
+# every revocation runs under the same per-path lock, and the lock file is
+# created before any security descriptor is read or written —
+#
+#   <GetTempPathW()>\dsh-acl-locks\<first 16 hex of sha256(lowercased path)>.lock
+#
+# — so a lock root that cannot be created or opened fails the grant AND its
+# cleanup together and produces this exact sentence having attempted no ACL
+# operation. It is also the only candidate a directory listing can settle, so it
+# is also the only one a reader can rule in or out with no privileges:
+#
+#   dir "<temp root>\dsh-acl-locks"
+#
+# The lock file is opened with `OPEN_ALWAYS` and never deleted, so an absent or
+# empty directory after a failure is itself the finding. The candidates after it
+# are the documented prerequisite (missing `WRITE_OWNER`, and `WRITE_DAC` for a
+# directory the caller does not own — a right on the DIRECTORY, not
+# `SeSecurityPrivilege` and not elevation) and the directory itself (created
+# first, so about the ACE not applying rather than about creation — with the trap
+# that a failing removal may be a consequence of a grant that left the directory
+# open, not a second fault). It ships NO repair command, for the reason the
+# standing-grant section ships none: the line names no directory, and a grant
+# aimed at the wrong one is worse than none. What it hands over is the listing
+# that names the directory, and then the backend's own
+# `diagnose-windows-sandbox-acl` skill — with the version boundary that the skill
+# arrives with the `0.2.0` line. It also discards the inference a reader makes
+# from the Config schema, because `#9460` made it: a visible `probeTimeoutMs`
+# suggests a capability probe classified by output signatures, but this backend's
+# Windows chain is a single rung selected without probing and its grant path
+# contains no probe at all, so no timer can produce this sentence. And it says
+# the two things the reporter measured as NOT working: `takeown /A` moves
+# ownership to Administrators, whose implicit rights are READ_CONTROL and
+# WRITE_DAC and therefore not `WRITE_OWNER`; `icacls /reset /T /C` restores an
+# inherited `Authenticated Users:(M)` entry that carries neither right.
+
 - insert:
     - id: sandbox-grant-advisor
       name: '@argszero/cordis-plugin-sandbox-grant-advisor'
