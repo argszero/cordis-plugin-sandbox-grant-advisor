@@ -639,6 +639,33 @@ Three producers have been measured under a confining mode:
    environment would take the ACL runner down with it, so the two changes have to
    land together.
 
+   **Added in 0.23.0 — the same producer, isolated one input narrower.** [`#9626`]
+   held the token recipe, the grants, the integrity lowering, the stdio shapes, the
+   workspace and the command fixed and varied **only the process image hosting the
+   runner**: the packaged `DeepSeek Harness.exe` (with `ELECTRON_RUN_AS_NODE=1`)
+   dies with `3221225794`, while a real `node.exe` running that same runner with
+   those same arguments exits `0`. Its controls close the neighbouring readings —
+   the *outer* subprocess runner's image is irrelevant (Electron outside + node
+   ACL runner succeeds; node outside + Electron ACL runner fails), a token
+   *inherited* from an Electron parent is harmless, `--write-sid` /
+   `--temp-write-sid` are not it, `cmd.exe` / `node.exe` / `pwsh.exe` all die as
+   targets, and `windowsHide` is not it — so what decides is the image that
+   **mints** the token. The report also names the line the product still assumes
+   otherwise: the invocation is built as `[process.execPath, runner.js]`
+   (`packages/sandbox/sandbox-local/src/index.ts`), whose own docstring promises
+   *"the prefix stays `[node, runner, ...]`"* and whose suite asserts
+   `windowsAclRunnerInvocation always yields [node, ...] in product` — which the
+   packaged build is the one form to falsify, because there `process.execPath` is
+   the Electron executable and not a Node binary. And it supplies a runtime
+   unblock the advisory carries **as the reporter's, not as the fix**: the
+   provider re-reads its `windowsAclRunnerArgs` test hook on every call, so a
+   host-side plugin can point the invocation at the packaged `node.exe` plus a
+   copy of `runner.js` living outside `app.asar` (a plain `node.exe` cannot read
+   the archive) and the next confined call is on a real host. It is a test hook
+   rather than an interface, which is why the fix stays the line above.
+   A sibling report of the same shape, filed by a second author twenty seconds
+   later, is not tracked separately.
+
    **What the flag vocabulary actually is.** The backend's own source records one
    inherent boundary: *"console isolation is unavailable — children share the host
    console (`CREATE_NO_WINDOW` / `CREATE_NEW_CONSOLE` children die with
@@ -759,11 +786,13 @@ Three producers have been measured under a confining mode:
    is the answer only when the runner **did** own one — the shape [`#9186`]
    measured, with a real node host and the DACLs untouched.
 
-   **A second candidate rides the same token, and it is carried as a candidate.**
-   [`#9336`] reasoned that adding SIDs to a restricting list only *widens* write
-   access, so the more suspicious input is the ACE the backend merges into the
-   token's **default DACL**. That reading is right about the asymmetry and
-   unmeasured about the effect: `setTokenDefaultDaclGrant`
+   **A second input rides the same token, and since `0.23.0` it is measured rather
+   than carried as a candidate.** [`#9336`] reasoned that adding SIDs to a
+   restricting list only *widens* write access, so the more suspicious input is the
+   ACE the backend merges into the token's **default DACL**. That reading was right
+   about the asymmetry and unmeasured about the effect; the measurement came as a
+   **supply of data rather than a defect report**, through this plugin's own issue
+   tracker, and it is quoted here as its reporter's. `setTokenDefaultDaclGrant`
    (`sandbox-windows-acl/src/token.ts`) merges one full-access restricting-SID ACE
    into the **existing** default DACL — `SetEntriesInAclW`, `GRANT_ACCESS`,
    `FILE_ALL_ACCESS`, extended rather than replaced — and the SID it names is
@@ -772,11 +801,47 @@ Three producers have been measured under a confining mode:
    workspace SID (a sha256 of the canonical workspace path, `S-1-4-x-y`), and
    Everybody under `read-only`. So `workspace-write` is the only mode whose default
    DACL names a synthetic identity at all — a real second difference between the
-   modes — and nobody has measured that ACE. The merge is also load-bearing in a way
-   that forbids the obvious experiment: every new object the confined process
-   creates takes its DACL from there, so an ACE removed to test the theory takes
-   every piped grandchild spawn down with it (`spawn EPERM`). The advisory names it,
-   says it is unmeasured, and says not to delete it.
+   modes.
+
+   **What the measurement rewrote was the trustee, not the ACE.** A Node
+   module-loading hook over the shipped runner changed that single call and
+   nothing else — the restricting list, the integrity lowering, the write grants,
+   `TEMP` handling, the command line and the workspace all held fixed — so the ACE
+   stayed where it was and only the SID it names changed. On Windows 10 19045:
+
+   - naming the capability SID fails (`0xC0000142`) with the restricting list as
+     shipped, with the two capability SIDs removed from it, and with the
+     integrity-level lowering removed;
+   - naming `Everyone` in that slot **succeeds**;
+   - and the arm that decides which half is the input names **both** — the
+     capability ACE left exactly where it is with `Everyone` added beside it also
+     reaches exit `0`.
+
+   So the failing input is not *"an ACE with a synthetic name was merged"* but the
+   **absence of a trustee the restricted token itself holds**, which is what the
+   mode asymmetry actually forbids. The same measurement dumps
+   `GetTokenInformation(TokenDefaultDacl)` from inside the confined child and finds
+   four entries — `Everyone` at full access, merged by the backend, beside
+   Administrators, SYSTEM and the logon SID at `0x10000000`, all three ambient and
+   identical to the unrestricted process's — so the merge **extends** this default
+   DACL; the "merge dropped the ambient half" reading does not apply on that
+   machine. The merge stays load-bearing in a way that forbids the obvious
+   experiment, and the working arm is the one that respects it: every new object
+   the confined process creates takes its DACL from there, so an ACE *removed* to
+   test the theory takes every piped grandchild spawn down with it (`spawn
+   EPERM`). The advisory still says not to delete it, and now says why the arm that
+   succeeded did not have to.
+
+   **Two boundaries ride with the rule.** First, the **console is a conjunction**
+   with it: on that machine the failure is *(no console) AND (no universally-held
+   trustee in the default DACL)*, and either one alone recovers — the same pair
+   [`#9336`] filed, read from the token's side rather than from the host's. Second,
+   the **build axis is open**, and the measurement's own reporter asked for it to be
+   recorded that way rather than folded into the rule: it is one build (Windows 10
+   19045), while this family also has a Windows 11 26200 report of the same
+   packaged-desktop shape ([`#8721`]) whose arms vary no default-DACL input at all.
+   So the advisory reads the outcome as `(mode × host × build)` and marks the third
+   dimension **not measured to be identical**.
 
    **And the switch costs something, which the backend's README states.** Under
    `read-only` PowerShell cannot create its AppLocker probe files in temp and
@@ -1723,3 +1788,5 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#9463]: https://github.com/deepseek-ai/deepseek-harness/discussions/9463
 [#9471]: https://github.com/deepseek-ai/deepseek-harness/discussions/9471
 [#7846]: https://github.com/deepseek-ai/deepseek-harness/discussions/7846
+[#9626]: https://github.com/deepseek-ai/deepseek-harness/discussions/9626
+[#8721]: https://github.com/deepseek-ai/deepseek-harness/discussions/8721

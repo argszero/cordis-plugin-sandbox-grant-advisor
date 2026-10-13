@@ -821,11 +821,15 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.match(flat, /Step 2: establish whether the runner OWNS A/)
   assert.match(flat, /A separating switch therefore confirms the sandbox and/)
   assert.match(flat, /this producer is the answer only when the runner DID own a/)
-  // The second candidate, and the asymmetry that makes it one: the token's
-  // default DACL names a synthetic SID only under `workspace-write`.
-  assert.match(flat, /A second candidate sits on the SAME token/)
+  // The second input, promoted from candidate to measurement by #9626, and the
+  // trustee rule the deciding arm licenses rather than the ACE story it refutes:
+  // the default DACL names a synthetic SID only under `workspace-write`, and what
+  // fails is the absence of a SID the token itself holds.
+  assert.match(flat, /A second input sits on the SAME token and is NOT the restricting list/)
   assert.match(flat, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
-  assert.match(flat, /CANDIDATE and not an answer/)
+  assert.match(flat, /was carried here as a candidate until #9626 measured it/)
+  assert.match(flat, /rewrote ONLY the SID that one call names/)
+  assert.match(flat, /not "an ACE with a synthetic name was merged" but the absence of a trustee the restricted token itself holds/)
   // And the cost of the switch, which the backend's README states.
   assert.match(flat, /A `read-only` session is NOT a substitute/)
   assert.match(flat, /ConstrainedLanguage/)
@@ -900,6 +904,17 @@ test('the Electron fact is reported, so the same code reads differently on the t
   assert.match(flatOn, /dependencies\/node\/bin\/node\.exe/, 'the desktop\'s own standalone node is named')
   assert.match(flatOn, /unpacked `node apps\/cli\/lib\/bin\.js web`/)
   assert.match(flatOn, /`danger-full-access` only CONFIRMS the diagnosis/)
+  // #9626's narrowed isolation rides in producer 2's (a) arm, so it is one text on
+  // both hosts; its Electron-only continuation is the runtime hook — and the hook
+  // is quoted as the REPORTER's, because a test hook offered as the fix would be
+  // this project shipping a repair it cannot verify.
+  assert.match(flatOn, /#9626 isolated the same producer one input/)
+  assert.match(flatOn, /only the process image HOSTING the runner varied/)
+  assert.match(flatOn, /the prefix stays `\[node, runner, …\]`/)
+  assert.match(flatOn, /QUOTED as the reporter's rather than offered as the fix/)
+  assert.match(flatOn, /`windowsAclRunnerArgs` hook on every call/)
+  assert.match(flatOn, /It is a test hook rather than an interface/)
+  assert.doesNotMatch(flatOn, /use `danger-full-access` to fix/)
   assert.doesNotMatch(flatOn, /run the same command with `danger-full-access`/, 'the widened mode is no longer the remedy offered')
   assert.match(offElectron.replace(/\s+/g, ' '), /producer 2 does not apply here/)
   assert.match(offElectron.replace(/\s+/g, ' '), /run producer 3's mode switch below/)

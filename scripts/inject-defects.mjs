@@ -238,13 +238,18 @@ const MUTATIONS = [
     edits: [["    '     CONSOLE, because producer 2 fails the very same switch. #9336 measured that pair from the packaged',", "    '     CONSOLE. #9336 measured that pair from the packaged',"]],
   },
   {
-    // The second candidate promoted to a finding. Nothing has measured that ACE,
-    // and the report framed it as a suspicion precisely because the mechanism
-    // could not be isolated on that machine.
-    name: 'the default-DACL candidate is asserted as the answer instead of named as a candidate',
+    // The finding #9626 measured, re-read as the story its deciding arm refutes.
+    // That arm keeps the capability ACE in place and adds `Everyone` beside it to
+    // exit 0, so what fails is the absence of a trustee the restricted token holds
+    // — not the merged ACE. A text that says "an ACE with a synthetic name was
+    // merged" sends the reader to delete an ACE that every piped grandchild needs.
+    name: 'the default-DACL measurement is re-read as the merged ACE instead of the missing trustee',
     file: 'src/advice.ts',
     arms: 'native-init.spec.mjs',
-    edits: [["    '     asymmetry is the one #9336 suspected, and it is a CANDIDATE and not an answer — nobody has measured it,',", "    '     asymmetry is the one #9336 isolated, and it is the answer for this failure:',"]],
+    edits: [[
+      "    '     beside it also reaches exit 0. So what fails is not \"an ACE with a synthetic name was merged\" but the',",
+      "    '     beside it also reaches exit 0. So what fails is \"an ACE with a synthetic name was merged\", and not the',",
+    ]],
   },
   {
     // The cost the report asked to have stated. Handing over the mode switch
@@ -261,7 +266,17 @@ const MUTATIONS = [
     name: 'the thread list drops the console axis the second step hands over',
     file: 'src/advice.ts',
     arms: 'native-init.spec.mjs',
-    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'"]],
+    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467 / #9626 / #8721'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186'"]],
+  },
+  {
+    // 0.23.0's own additions to that list. The narrowed isolation is the family's
+    // second confirmation of producer 2 and #8721 is the thread the build axis is
+    // left open against, so a list that stops before them cites evidence the
+    // advisories never reach — a smaller family than the text describes.
+    name: 'the thread list stops before the newest confirmation and the open build axis',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467 / #9626 / #8721'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'"]],
   },
   {
     // 0.20.0's whole addition: #9467 turned the third producer's input from one
@@ -837,7 +852,7 @@ const MUTATIONS = [
     file: 'cordis.patch.yml',
     arms: 'packaging.spec.mjs',
     edits: [
-      ['# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421, #8409).', '# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421).'],
+      ['# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421, #8409, #9559).', '# A FOURTH family is the other half of the FIRST one\'s backend (#423, #8383,\n# #8421).'],
       ['THE ROOT ITSELF REFUSED, nothing writable, not even the root', 'A third shape of the same denial'],
       ['restart the desktop\n#     app or open the workspace in a fresh one', 'upgrade the harness\n#     or open the workspace in a fresh one'],
     ],

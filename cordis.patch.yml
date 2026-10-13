@@ -172,11 +172,24 @@
 # the same argv passes in both modes from a console-bearing chain — so the failing
 # combination is a console-less host AND a confining token, and the status code
 # still cannot supply the comparison (too few entries in the restricting list land
-# on the same `0xC0000142`). A second candidate on the same token is named as a
-# candidate and not as a finding: the token's DEFAULT DACL, which
-# `setTokenDefaultDaclGrant` extends with a full-access ACE naming
+# on the same `0xC0000142`). A second input on the same token is no longer carried
+# as a candidate, because since 0.23.0 it is MEASURED: the token's DEFAULT DACL,
+# which `setTokenDefaultDaclGrant` extends with a full-access ACE naming
 # `tempWriteSid ?? writeSid ?? Everyone`, so `workspace-write` is the only mode
-# whose default DACL names a synthetic identity at all. And the advisory says what
+# whose default DACL names a synthetic identity at all. The measurement rewrote the
+# trustee rather than the ACE — only the SID that one call names changed — and the
+# arm that names the capability SID AND `Everyone` together still recovers, so what
+# fails is the absence of a trustee the restricted token holds and not the presence
+# of a synthetic one. Two boundaries ride with it: the console is a CONJUNCTION with
+# it (either recovers alone), and the build axis is left open, because the
+# measurement is one build and the family has another (#8721, the same
+# packaged-desktop shape filed from Windows 11 26200, whose arms vary no
+# default-DACL input at all). The same wave isolates the
+# desktop-host producer one input narrower — only the image hosting the runner
+# varied, the packaged Electron binary against a real node.exe (#9626) — and names
+# the line where that image is chosen: `[process.execPath, runner.js]`, whose own
+# docstring and suite both assert the interpreter is `node`, which the packaged
+# build is the one form to falsify. And the advisory says what
 # the mode switch costs, because the backend's README does: under `read-only`
 # PowerShell enters ConstrainedLanguage, so it is a diagnostic step and not a
 # repair. It also states the one rule the whole family

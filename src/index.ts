@@ -65,9 +65,19 @@
  * `read-only` from the desktop's chain, while the same argv passes in both modes
  * from a console-bearing one — so the check runs in two steps and `#9238`'s
  * console-topology matrix is what supplies the second; and the token's **default
- * DACL** is named as the second candidate the report raised, unmeasured, with the
- * asymmetry that makes it one (`workspace-write` is the only mode whose default
- * DACL names a synthetic SID) and the reason it must not be deleted to test it.
+ * DACL** is named as the second candidate the report raised, with the asymmetry that
+ * makes it one (`workspace-write` is the only mode whose default DACL names a
+ * synthetic SID) and the reason it must not be deleted to test it. `0.23.0` promotes
+ * that candidate: `#9626` measured it by rewriting only the SID the merge names, and
+ * the arm that names the capability SID AND `Everyone` together recovers — so the
+ * input is the absence of a trustee the restricted token holds rather than the
+ * presence of a synthetic one — bounded by the console as a *conjunction* (either
+ * recovers alone) and by the build axis left open. The same report isolates
+ * producer 2 one input narrower by varying only the image the runner is hosted by —
+ * the packaged Electron binary against a real `node.exe` — and names the line where
+ * that image is chosen: `[process.execPath, runner.js]`, whose docstring and test
+ * both assert the interpreter is `node`, which the packaged build is the one form to
+ * falsify.
  *
  * This family is read from the **canonical value of a successful result**, which
  * is why the seam below now inspects both outcomes. The producer never marks it

@@ -297,8 +297,10 @@ test('the mode switch is one step of two, because a console-less host fails it t
   // producers name these two threads in their own prose, so a mention proves
   // nothing about the list a reader is sent to. 0.20.0 moved the end: #9467 and
   // #9463 joined the list, so the pinned end is what keeps a later release from
-  // appending a thread the advisories never cover.
-  assert.match(body, /tracked upstream \(discussions [^)\n]*#9238 \/ #9336 \/ #9463 \/ #9467\)/)
+  // appending a thread the advisories never cover. 0.23.0 moved it again: #9626
+  // (this family's second isolation of the desktop-host producer) and #8721 (the
+  // thread the build axis is left open against).
+  assert.match(body, /tracked upstream \(discussions [^)\n]*#9238 \/ #9336 \/ #9463 \/ #9467 \/ #9626 \/ #8721\)/)
 })
 
 test('read-only is named as a diagnostic and not as a repair, with the language mode it costs', async () => {
@@ -317,22 +319,73 @@ test('read-only is named as a diagnostic and not as a repair, with the language 
   assert.match(body, /WDAC\/AppLocker policy/)
 })
 
-test('the token default DACL is carried as a candidate, with the asymmetry that makes it one', async () => {
-  // #9336's suspicion, stated precisely and not promoted to a finding: the mode
-  // switch has a second difference besides the restricting list — the SID the
+test('the token default DACL is a MEASURED input, with the trustee rule the measurement licenses', async () => {
+  // #9336's suspicion, which 0.18.0 carried as a candidate and 0.23.0 carries as a
+  // measurement: besides the restricting list, the modes differ in the SID the
   // backend merges into the token's default DACL, which is synthetic only under
-  // `workspace-write`. Nothing has measured that ACE, and it cannot simply be
-  // removed to test it: it is what keeps every piped grandchild spawning.
+  // `workspace-write`. The measurement changed the trustee and not the ACE, and its
+  // deciding arm names BOTH — the capability ACE still in place, `Everyone` added
+  // beside it, exit 0 — so what the advisory may claim is the absence of a trusteed
+  // SID and not the presence of a synthetic one. Every one of those facts is what
+  // keeps the text from re-inflating into "the ACE is the cause", which is the
+  // reading the shipped ACE proves wrong.
   const { ctx } = await deathWorld()
   const body = contexts(await call(ctx, 'pwsh', { command: 'cmd /c echo x' }))[0]
     .content.map(block => block.text).join('\n')
-  assert.match(body, /A second candidate sits on the SAME token/)
+  assert.match(body, /A second input sits on the SAME token and is NOT the restricting list/)
   assert.match(body, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
   assert.match(body, /it extends rather than replaces/)
   assert.match(body, /tempWriteSid \?\? writeSid \?\?\s+Everyone/)
   assert.match(body, /only mode whose default DACL\s+names a synthetic identity at all/)
-  assert.match(body, /CANDIDATE and not an answer/)
+  // The promotion itself, and the arm that decides it: a text that says
+  // "measured" without the both-names arm would license exactly the conclusion the
+  // arm rules out.
+  assert.match(body, /rewrote ONLY the SID that one call names/)
+  assert.match(body, /with `Everyone` added\s+beside it also reaches exit 0/)
+  assert.match(body, /not "an ACE with a synthetic name was merged" but the\s+absence of a trustee the restricted token itself holds/)
+  // The three arms that bound the rule rather than support it: the restricting list
+  // is not the input here, the console is a conjunction, and the build stays open.
+  assert.match(body, /taking the write SIDs back OUT of the restricting list does not recover/)
+  assert.match(body, /\(no\s+console\) AND \(no universally-held trustee in the default DACL\)/)
+  assert.match(body, /either one alone recovers/)
+  assert.match(body, /\(mode × host × build\)/)
+  assert.match(body, /NOT measured to be the same/)
+  // The ambient dump is what retires the "merge replaced the ambient half" reading,
+  // and the deletion warning survives it — with the reason the working arm kept the
+  // ACE, so the next reader does not try the experiment anyway.
+  assert.match(body, /four entries/)
+  assert.match(body, /all three .*ambient.* identical to the unrestricted process's/s)
+  assert.match(body, /the merge EXTENDS this default DACL/)
   assert.match(body, /load-bearing for every piped grandchild spawn/)
+  assert.match(body, /adds a\s+trustee to it rather than taking one away/)
+})
+
+test('the desktop-host producer gains a narrower isolation and the line that decides it (#9626)', async () => {
+  // 0.23.0's second half. The producer was already measured from three directions;
+  // this report held everything fixed but the process IMAGE hosting the runner,
+  // which is what lets the advisory say the token's origin decides rather than its
+  // launch — and it names the line where that image is chosen, an invariant the
+  // product asserts and the packaged build is the one form to falsify. The controls
+  // are asserted too: they are the reason the arm is about the image, and a text
+  // that dropped them would leave a reader free to blame the outer runner.
+  const { ctx } = await deathWorld()
+  const body = contexts(await call(ctx, 'pwsh', { command: 'echo x' }))[0]
+    .content.map(block => block.text).join('\n')
+  assert.match(body, /#9626 isolated the same producer one input/)
+  assert.match(body, /only the process image HOSTING the runner varied/)
+  assert.match(body, /its controls close the neighbours/i)
+  assert.match(body, /OUTER subprocess runner's\s+image does not matter/)
+  assert.match(body, /token INHERITED from an Electron parent is harmless/)
+  assert.match(body, /image that MINTS the\s+token/)
+  assert.match(body, /the prefix stays `\[node, runner, …\]`/)
+  assert.match(body, /which the packaged build falsifies/)
+  // This harness is a genuine node host, and the branch it takes is chosen from
+  // the measured fact rather than from the report — so the narrowed isolation is
+  // asserted here while the Electron-only half of it (the reporter's runtime hook
+  // and the caveat that quotes it as theirs) is asserted where that branch renders.
+  assert.match(body, /This process is NOT an Electron binary/)
+  assert.match(body, /the runner is a real\s+Node binary here/)
+  assert.doesNotMatch(body, /This process IS an Electron binary/)
 })
 
 test('the third producer carries a RULE, not one measurement (0.20.0)', async () => {

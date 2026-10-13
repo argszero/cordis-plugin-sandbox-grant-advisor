@@ -129,11 +129,39 @@
  *   than as a build-specific suspicion. The candidate is the token's **default
  *   DACL**, which `setTokenDefaultDaclGrant` extends with a full-access ACE naming
  *   `tempWriteSid ?? writeSid ?? Everyone` — which makes `workspace-write` the only
- *   mode whose default DACL names a synthetic identity at all. It is named as a
- *   candidate and not as an answer: nothing has measured it, and that ACE is what
- *   keeps every piped grandchild spawning. What the switch costs is stated too,
- *   because the report asked for it: under `read-only` PowerShell enters
- *   ConstrainedLanguage, so a command that "works" there may no longer run.
+ *   mode whose default DACL names a synthetic identity at all. What the switch
+ *   costs is stated too, because the report asked for it: under `read-only`
+ *   PowerShell enters ConstrainedLanguage, so a command that "works" there may no
+ *   longer run.
+ *   Since `0.23.0` that candidate is a **measurement**, and the measurement moved
+ *   the input one step: a user held the token recipe, the grants, the stdio and the
+ *   command fixed and rewrote only the SID that single call names — a Node
+ *   module-loading hook over the shipped runner, so the ACE stayed where it was and
+ *   only its trustee changed. Naming `Everyone` recovers, naming the capability SID
+ *   fails, and the arm that decides it is the one that names **both**: the
+ *   capability ACE left in place with `Everyone` beside it also recovers. So the
+ *   failing input is not "an ACE with a synthetic name was merged" but **whether the
+ *   default DACL names a trustee the restricted token itself holds** — which is what
+ *   makes the shipped name the failing one, and what the mode asymmetry actually
+ *   forbids. Two further arms bound it: removing the write SIDs from the restricting
+ *   list does **not** recover (a different input, which is why this is not producer
+ *   3 again), and the console axis is a **conjunction** with this one — on the
+ *   machine that was measured the failure is *(no console) AND (no universally-held
+ *   trustee in the default DACL)*, and either alone recovers. The measurement dumps
+ *   `TokenDefaultDacl` from inside the confined child too: the merge EXTENDS the
+ *   default DACL (three ambient trustees survive it), so the "merge dropped the
+ *   ambient half" reading does not apply there. It was measured on ONE build and the
+ *   build axis is **not** measured to be the same, so the text names
+ *   `(mode × host × build)` and leaves the build open; and the warning not to delete
+ *   that ACE survives intact, because the arm that works is the one that keeps it.
+ *   Since `0.23.0` producer 2 carries a second, narrower isolation as well: the same
+ *   runner recipe with only the hosting process IMAGE varied — the packaged
+ *   Electron binary against a real `node.exe` — which is the arm that says the
+ *   token's own origin, and nothing about the outer runner's launch, is what decides
+ *   it. Where that image is chosen is named for the reader: the runner argv is built
+ *   as `[process.execPath, runner.js]` and its own docstring and test both assert the
+ *   prefix is `node`, an invariant the packaged build falsifies because it is the one
+ *   form where `process.execPath` is not a Node binary.
  *   That Electron host was shipped as **two measurements**; since
  *   0.8.0 it is **one mechanism, named**: the runner must own a *console* for the
  *   confined child to inherit, and when it owns none the child's own console
@@ -377,8 +405,20 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * them all under `read-only`, while the same runner under the same argv returns
  * 0 in BOTH modes from a console-bearing chain. That report is also the source
  * of the `read-only` cost the advisory now states (ConstrainedLanguage) and of
- * the default-DACL candidate, which the advisory carries as a candidate rather
- * than as a finding.
+ * the default-DACL candidate — which `0.23.0` promotes out of candidacy, because a
+ * user measured it and the measurement named which half of it was the input.
+ *
+ * `#9626` is the fourth wave's second isolation of producer 2, and it is narrower
+ * than the ones before it: the token recipe, the grants, the stdio shapes, the
+ * workspace and the command all held fixed, with only the process IMAGE hosting the
+ * runner varied — the packaged Electron binary against a real `node.exe`. It is the
+ * arm that says the token's own origin decides, and it names the place the product
+ * still assumes otherwise: the runner argv is built as `[process.execPath,
+ * runner.js]`, whose docstring promises "the prefix stays `[node, runner, ...]`" and
+ * whose own test asserts it holds in product — which the packaged build falsifies,
+ * being the one form where `process.execPath` is not a Node binary. A sibling report
+ * of the same shape (a second author, twenty seconds later) is not tracked
+ * separately.
  *
  * `#9467` and `#9463` are the third wave, filed on Windows 10 19044 and Windows 11
  * 26200 on one day. `#9467` is the one that made this producer a rule rather than a
@@ -394,7 +434,7 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * claiming it. `#9471`'s message-bearing runtime-load denial is named as scope for
  * the same reason and is likewise not classified.
  */
-export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'
+export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467 / #9626 / #8721'
 
 /**
  * The upstream threads the workspace-denial advisory is a stopgap for.
@@ -1058,7 +1098,17 @@ function nativeInitAdvisory(
     '     is created BY the restricted child, exits `0xC0000022 STATUS_ACCESS_DENIED`, and the child then dies',
     '     with the code above. Both console-less configurations are measured:',
     '     (a) the host binary is a GUI-subsystem program, which never owns a console — the packaged desktop,',
-    '         where every confined command dies this way (#8193);',
+    '         where every confined command dies this way (#8193). #9626 isolated the same producer one input',
+    '         narrower than the arms before it: same token recipe, same grants, same stdio shapes, same workspace,',
+    '         same command, and only the process image HOSTING the runner varied — the packaged',
+    '         `DeepSeek Harness.exe` dies with `0xC0000142`, while a real `node.exe` runs that same runner with',
+    '         those same arguments to exit `0`. Its controls close the neighbours: the OUTER subprocess runner\'s',
+    '         image does not matter, a token INHERITED from an Electron parent is harmless, and `cmd.exe`,',
+    '         `node.exe` and `pwsh.exe` all die as targets. What decides is therefore the image that MINTS the',
+    '         token. Where that image is chosen is a line the reader can name: the invocation is',
+    '         `[process.execPath, runner.js]`, whose docstring promises "the prefix stays `[node, runner, …]`" and',
+    '         whose own suite asserts it holds in product — which the packaged build falsifies, being the one form',
+    '         where `process.execPath` is not a Node binary;',
     '     (b) the host binary is a real console-subsystem `node.exe` and the runner was still spawned without a',
     '         console, because `DETACHED_PROCESS` was set: `spawnSync(node, [runner, …], { detached: true })`',
     '         returns `0xC0000142` while the same call without that flag returns `0` (#8208). That arm needs no',
@@ -1087,6 +1137,12 @@ function nativeInitAdvisory(
           '     #8208 measured `cmd /c exit` and `pwsh -c "Write-Output …"` both reaching 0 with stdout intact under',
           '     that change, and as a no-op on a runner that already owns a console; it costs a `user32` binding and',
           '     one console host per runner process.',
+          '     A narrower unblock needs no rebuild, and it is QUOTED as the reporter\'s rather than offered as the',
+          '     fix: that invocation is overridable at runtime, because the provider re-reads its',
+          '     `windowsAclRunnerArgs` hook on every call — so a host-side plugin can point it at that same packaged',
+          '     `node.exe` plus a copy of `runner.js` that lives outside `app.asar` (a plain `node.exe` cannot read',
+          '     the archive), and the very next confined call is on a real host (#9626). It is a test hook rather',
+          '     than an interface, which is why the line above — hosting the runner on a real node — stays the fix.',
           '     `danger-full-access` only CONFIRMS the diagnosis: on this platform it silently removes the sandbox',
           '     from every shell call. Do not unset `ELECTRON_RUN_AS_NODE` instead either — the desktop runner IS',
           '     that Electron binary, so dropping the variable would take `runner.js` down with it (#8193 records',
@@ -1138,19 +1194,43 @@ function nativeInitAdvisory(
     '     REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. #9467 measured all of this on',
     '     Windows 10 19044, so the build number is not the variable here.',
     '',
-    '     A second candidate sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL.',
-    '     `setTokenDefaultDaclGrant` merges one full-access ACE into it — `SetEntriesInAclW`, GRANT_ACCESS,',
-    '     FILE_ALL_ACCESS, onto the EXISTING default DACL, so it extends rather than replaces — because every new',
-    '     object the confined process creates takes its DACL from that default, and without a restricting SID named',
-    '     in it a new anonymous stdio pipe fails its own write check and every piped grandchild dies with `spawn',
-    '     EPERM`. WHICH SID it names is where the two modes differ a second time: `tempWriteSid ?? writeSid ??',
-    '     Everyone` — the private temp SID under `workspace-write` when a temp directory exists, otherwise the',
-    '     workspace SID, and Everyone under `read-only`. So `workspace-write` is the only mode whose default DACL',
-    '     names a synthetic identity at all: the workspace SID is a sha256 of the canonical workspace path',
-    '     (`S-1-4-x-y`), and the temp SID is a domain-separated identity derived from its own directory. That',
-    '     asymmetry is the one #9336 suspected, and it is a CANDIDATE and not an answer — nobody has measured it,',
-    '     and both mechanisms ride the same token in the same mode or not at all. Do not delete that ACE to test',
-    '     it either: it is load-bearing for every piped grandchild spawn.',
+    '     A second input sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL. It',
+    '     was carried here as a candidate until #9626 measured it, and the measurement is quoted as ITS',
+    '     reporter\'s rather than as ours.',
+    '     `setTokenDefaultDaclGrant` merges one full-access ACE into that default DACL — `SetEntriesInAclW`,',
+    '     GRANT_ACCESS, FILE_ALL_ACCESS, onto the EXISTING one, so it extends rather than replaces — because every',
+    '     new object the confined process creates takes its DACL from there, and without a SID the confined token',
+    '     holds named in it a new anonymous stdio pipe fails its own write check and every piped grandchild dies',
+    '     with `spawn EPERM`. WHICH SID it names is where the two modes differ a second time:',
+    '     `tempWriteSid ?? writeSid ?? Everyone` — the private temp SID under `workspace-write` when a temp',
+    '     directory exists, otherwise the workspace SID, and Everyone under `read-only`. So `workspace-write` is',
+    '     the only mode whose default DACL names a synthetic identity at all: the workspace SID is a sha256 of the',
+    '     canonical workspace path (`S-1-4-x-y`), and the temp SID is a domain-separated identity derived from its',
+    '     own directory.',
+    '',
+    '     The measurement held the token recipe, the grants, the integrity lowering, the stdio shapes, the',
+    '     command line, `TEMP` handling and the workspace fixed, and rewrote ONLY the SID that one call names — a',
+    '     Node module-loading hook over the shipped runner, so the ACE stayed where it was and only its trustee',
+    '     changed. Naming `Everyone` there SUCCEEDS; naming the capability SID fails; and the arm that settles',
+    '     which half is the input names BOTH — the capability ACE left exactly where it is with `Everyone` added',
+    '     beside it also reaches exit 0. So what fails is not "an ACE with a synthetic name was merged" but the',
+    '     absence of a trustee the restricted token itself holds, which is what the mode asymmetry above actually',
+    '     forbids. Two arms bound it: taking the write SIDs back OUT of the restricting list does not recover',
+    '     either (a different input — this is not producer 3 measured twice), nor does dropping the integrity-level',
+    '     lowering. And the dump of `TokenDefaultDacl` from inside the confined child shows four entries —',
+    '     `Everyone` at full access, merged by the backend, beside Administrators, SYSTEM and the logon SID at',
+    '     `0x10000000`, all three unused-by-the-merge and ambient, identical to the unrestricted process\'s — so',
+    '     the merge EXTENDS this default DACL; it did not replace an ambient half on that machine.',
+    '',
+    '     Read the result as `(mode × host × build)`, because the third axis is open. This measurement is one',
+    '     build (Windows 10 19045), and its own reporter asked for it to be recorded that way rather than folded',
+    '     into a rule: the failure there is *(no console) AND (no universally-held trustee in the default DACL)*',
+    '     — either one alone recovers, which is #9336\'s pair seen from the token\'s side rather than from the',
+    '     host\'s. A second build files the same packaged-desktop shape (#8721, Windows 11 26200) and varies no',
+    '     default-DACL input at all, so the build axis is NOT measured to be the same and is marked open.',
+    '     The build dimension does not change the one thing not to do here: do not delete that ACE to test any of',
+    '     this: it is load-bearing for every piped grandchild spawn, which is also why the arm above adds a',
+    '     trustee to it rather than taking one away.',
     '',
     'Do not retry this call: the environment has not changed, and the identical call produces the identical',
     'code. Convert the work only in case 1; otherwise stop and hand it to the user.',
