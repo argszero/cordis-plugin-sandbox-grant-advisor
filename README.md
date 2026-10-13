@@ -279,8 +279,10 @@ backend does not take it back:
   one security descriptor — and a pnpm workspace is largely hard links (`node_modules` pointing into a
   content-addressed store on the same volume). ... `vite build` unable to remove its own temp file, `pnpm
   install` unable to replace a hook (#8314 measured the whole chain). ...
-  It is also why the label is not simply removable here: ... This advisory hands over no removal command: the
-  maintainers' own skill does not, and an unverified one would be the defect this plugin exists to answer.
+  It is also why the label is not removable by the commands above: removing an integrity label needs
+  `WRITE_OWNER`, and the maintainers' own `diagnose-windows-sandbox-acl` skill reports it without removing it.
+  A procedure that does remove it exists, and the advisory quotes it as its reporter's rather than this
+  project's — with the boundaries that come with it ([#7846]; see the section below).
 None of this makes the command above the wrong move — without it, nothing sandboxed runs in this workspace. It
 is what the harness does to a directory it has been pointed at, and it is worth knowing before rather than
 discovering it as a broken build in some other project later.
@@ -310,7 +312,7 @@ unconditional one-liner was printed, with a sentence noting it assumed
 ownership; that would have sent the second environment to a command that is
 denied — the same defect this plugin exists to answer.
 
-#### What the grant leaves behind (added in 0.10.0)
+#### What the grant leaves behind (added in 0.10.0; the recovery quoted as its reporter's since 0.21.0)
 
 [Discussion #8312] and [discussion #8314] report the other half of this backend,
 and the advisory now states it — before the reader runs the command it is being
@@ -345,12 +347,36 @@ handed, because that command is what makes the backend's grant apply:
   reach an external file object"* (`tests/runner.spec.ts`) — and its README calls
   refusing multiply-linked files unviable for ordinary pnpm installs, which
   leaves the out-of-tree reach open rather than unknown.
-- **No removal command is shipped.** The maintainers' own
-  `diagnose-windows-sandbox-acl` skill *reports* `LOW_LABEL` and by design does
-  not remove it, and removing an integrity label needs `WRITE_OWNER` — the same
-  right this whole failure is about. This project has no Windows host to verify a
-  line on, so shipping one would be exactly the defect the rest of this module
-  exists to answer; the section says where it stops instead.
+- **A removal procedure exists, and it is a user's rather than ours.** The
+  maintainers' own `diagnose-windows-sandbox-acl` skill *reports* `LOW_LABEL` and
+  by design does not remove it, and removing an integrity label needs
+  `WRITE_OWNER` — the same right this whole failure is about. But [#7846]'s
+  reporter measured one end to end on a real tree, and the advisory hands it over
+  **as theirs**, with its boundaries: back the ACLs up (`icacls <dir> /save`),
+  drop the world deny with `icacls <dir> /remove:d "Everyone"`, remove the
+  capability ACE through the ACL API — `icacls` cannot name an `S-1-4-x-y` SID at
+  all and answers `ERROR_NONE_MAPPED` (1332), so a PowerShell `(Get-Acl).Access`
+  / `RemoveAccessRule` / `Set-Acl` is the only route — and relabel with
+  `icacls <dir> /setintegritylevel M /T` (85 613 objects, no failures). What it
+  leaves behind is an **explicit Medium mandatory label**, not the absence of
+  one; the relabel visits the whole tree; and the label edit needs `WRITE_OWNER`
+  per object. This project still verifies no line of it on a Windows host, which
+  is why it is quoted rather than shipped as our own command — the same standard
+  the hard-link reach above is held to.
+- **`read-only` writes no label.** The grant and the label it carries are applied
+  only where the seam materializes a writable root: the session-scoped path
+  returns before that point for `read-only`, and the runner builds its sandbox
+  with an empty writable list, so the loop that calls the label writer has nothing
+  in it. A label found after a `read-only` session came from an **earlier**
+  `workspace-write` period on that directory — which is a different statement
+  about who is exposed, and worth separating before attributing the symptom.
+- **What was priced is the other direction.** The decision record's own cost line
+  says the standing Low label *"widens the workspace tree for ANY other process
+  running at Low integrity as the same user"*, and this package's known
+  limitations say it plainer — such a process *"can write and delete inside the
+  workspace, where a Medium label would have denied it"*. Both describe a
+  loosening. Neither prices what [#7846] measured: the user's own
+  Medium-integrity toolchain losing the tree.
 
 The section is emitted for **every** ACL class, like the version boundary and for
 the same reason: it is a fact about the package's grant, and that grant is the
@@ -1453,9 +1479,13 @@ than one that stays silent.
   as such. What it states about a hard link carrying the label onto a
   content-addressed store is [#8314]'s measurement on their machine, which is why
   the advisory attributes it instead of asserting it as a property of every
-  workspace, and why **no removal command is shipped**: this project has no
-  Windows host on which to verify one, and an unverified removal command is the
-  same defect this plugin exists to answer.
+  workspace. **No removal command is shipped as this project's own**: this project
+  has no Windows host on which to verify one, and an unverified removal command is
+  the same defect this plugin exists to answer. Since 0.21.0 the advisory does quote
+  the procedure [#7846]'s reporter measured end to end — named as theirs, with its
+  three boundaries stated beside it, and with the two claims that report cannot
+  settle left unsaid (which standing entry refused the writer, and any attribution
+  of the loss to the label).
 - **It repairs nothing and elevates nothing.** If the directory really is
   Full-control for the caller, the remaining ACL hypothesis is
   `SeSecurityPrivilege` — i.e. the backend's documented prerequisite would be
@@ -1651,3 +1681,4 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#9467]: https://github.com/deepseek-ai/deepseek-harness/discussions/9467
 [#9463]: https://github.com/deepseek-ai/deepseek-harness/discussions/9463
 [#9471]: https://github.com/deepseek-ai/deepseek-harness/discussions/9471
+[#7846]: https://github.com/deepseek-ai/deepseek-harness/discussions/7846

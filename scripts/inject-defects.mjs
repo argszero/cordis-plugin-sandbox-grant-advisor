@@ -353,10 +353,60 @@ const MUTATIONS = [
     edits: [["    '  The three entries are STANDING, deliberately, and nothing revokes them. The workspace grant is a reuse cache:',", "    '  The three entries are removed when the harness exits. The workspace grant is a reuse cache:',"]],
   },
   {
-    name: 'the advisory ships a removal command for the label it cannot remove',
+    // Since 0.21.0 the advisory does quote a removal procedure (#7846) — but as
+    // its reporter's, never as this project's own recommendation. An advisory that
+    // presents it as ours hands a reader a line on a host this project has never
+    // verified, which is the defect the rest of the module exists to answer.
+    name: 'the quoted recovery is presented as this project\'s own recommendation',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    '  WRITE_OWNER — the same right this whole failure is about. This advisory hands over no removal command: the',", "    '  WRITE_OWNER — the same right this whole failure is about. Remove it with `icacls \"<dir>\" /setintegritylevel',"]],
+    edits: [[
+      "    '  A procedure for removing all three DOES exist, and it is a user\\'s rather than ours (#7846 measured it end to',",
+      "    '  A procedure for removing all three exists, and it is this project\\'s own recommendation (#7846 measured it end to',",
+    ]],
+  },
+  {
+    name: 'the quoted recovery loses the boundary that it leaves an explicit Medium label behind',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  visits the WHOLE tree one object at a time; what it leaves behind is an EXPLICIT Medium mandatory label, not',",
+      "    '  visits the WHOLE tree one object at a time; what it leaves behind is the state the directory started in, not',",
+    ]],
+  },
+  {
+    // The report cannot separate the three standing entries — its recovery clears
+    // all of them at once — so attributing the lost tree to the label would be a
+    // finding dressed as a fact, and the label's own policy (no-write-up) is what
+    // refutes it: it stops the Low processes below it, not the Medium ones above.
+    name: 'the lost tree is attributed to the label, which the no-write-up policy refutes',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  separate them — and this advisory does not attribute the loss to the label: what it writes is a no-write-up',",
+      "    '  separate them — and the label is what denied it: what it writes is a no-write-up',",
+    ]],
+  },
+  {
+    // `read-only` writes no label at all (three layers of the seam agree), so a
+    // label found after such a session is inherited from an earlier period. An
+    // advisory that blurs the two sends the reader after the wrong session.
+    name: '`read-only` is described as writing the standing label too',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  `read-only` does not write it. The grant and the label it carries are applied only where the seam',",
+      "    '  `read-only` writes it as well. The grant and the label it carries are applied wherever the seam',",
+    ]],
+  },
+  {
+    name: 'the pricing asymmetry is dropped, so both directions read as priced',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  user\\'s own toolchain losing the tree. A loosening was evaluated; this direction was not. Which standing',",
+      "    '  user\\'s own toolchain losing the tree. Both of these directions were priced when it was designed. Which standing',",
+    ]],
   },
   {
     name: 'the persistent-shell failure is called intermittent instead of deterministic per mode and host',
@@ -1118,6 +1168,21 @@ const MUTATIONS = [
       '# That is an `AggregateError` message, and Node builds such a message from the',
       '# That is how the failure is surfaced, and Node builds such a message from the',
     ]],
+  },
+  {
+    // The first family gained a thread in 0.21.0, and the mount instructions are
+    // published prose with no compiler over them: a patch that stops at #8412
+    // describes a smaller family than the advisory it loads. All three of its
+    // mentions go, because the assertion is a name check and one survivor would
+    // satisfy it — the arm has to remove the thread, not one of its sentences.
+    name: 'the mount instructions drop the first family\'s newest thread',
+    file: 'cordis.patch.yml',
+    arms: 'packaging.spec.mjs',
+    edits: [
+      ['(#8312, #8314, #8412,\n# #7846): the three entries', '(#8312, #8314, #8412): the three entries'],
+      ['end to end instead (#7846: `icacls /remove:d "Everyone"`', 'end to end instead: `icacls /remove:d "Everyone"`'],
+      ["other Low-integrity processes, and what #7846 measured is the user's own", "other Low-integrity processes, and what that measured is the user's own"],
+    ],
   },
 ]
 

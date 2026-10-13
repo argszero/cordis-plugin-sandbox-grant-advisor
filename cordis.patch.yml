@@ -55,19 +55,30 @@
 # the confined token is itself lowered to Low, so the directory's Low label is
 # what lets that child write there at all.
 #
-# And it says WHAT THE GRANT LEAVES BEHIND once it applies (#8312, #8314, #8412):
-# the three entries are STANDING and nothing revokes them (the backend's own dispose
-# and fail-closed paths leave them — "the intended end state (the reuse cache)"),
-# the Low integrity label is INHERITABLE and lives in the SACL (so `icacls /reset`
-# does not remove it — that rebuilds the DACL), a process starts at
+# And it says WHAT THE GRANT LEAVES BEHIND once it applies (#8312, #8314, #8412,
+# #7846): the three entries are STANDING and nothing revokes them (the backend's own
+# dispose and fail-closed paths leave them — "the intended end state (the reuse
+# cache)"), the Low integrity label is INHERITABLE and lives in the SACL (so
+# `icacls /reset` does not remove it — that rebuilds the DACL), a process starts at
 # min(user, image) integrity, and an NTFS hard link shares one security descriptor
 # with the file object it names — so in a pnpm workspace, whose node_modules are
 # hard links into a content-addressed store, the label can reach OUTSIDE the tree
 # and stay on the store's objects, after which unrelated builds fail in ways that
 # name the build tool and not DSH. The section is stated before the reader runs
-# the command, and it ships NO removal command: the maintainers' own diagnosis
-# skill reports the label and does not remove it, and removing an integrity label
-# needs WRITE_OWNER.
+# the command. It ships NO removal command of its own — the maintainers' own
+# diagnosis skill reports the label and does not remove it, and removing an
+# integrity label needs WRITE_OWNER — and hands over the procedure a user measured
+# end to end instead (#7846: `icacls /remove:d "Everyone"`, then the capability ACE
+# through the ACL API because `icacls` cannot name an `S-1-4-x-y` SID and answers
+# ERROR_NONE_MAPPED (1332), then `icacls /setintegritylevel M /T` over 85613
+# objects), attributed to that report and shipped with its three boundaries: the
+# relabel visits the whole tree, what it leaves is an EXPLICIT Medium label rather
+# than none, and it needs WRITE_OWNER per object. It also states that `read-only`
+# writes no label, so a label found after such a session is inheritance from an
+# earlier `workspace-write` period; and it names the direction the design never
+# priced — the record's own cost line prices the label as LOOSENING the tree for
+# other Low-integrity processes, and what #7846 measured is the user's own
+# Medium-integrity toolchain losing it.
 #
 # Optional config:
 #

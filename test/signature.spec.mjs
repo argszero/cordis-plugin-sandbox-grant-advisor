@@ -349,10 +349,14 @@ test('the missing right is confirmed by a measurement, not only by a reading of 
   // uses — object right first, label second.
   assert.match(flat, /object right first, integrity label second, 9521 and 5592 objects, no failures/)
   assert.match(flat, /an order that cannot be swapped/)
-  // And the rule the probe stays out of the advisory for.
-  assert.match(flat, /is not offered as a check: a label write is not a read/)
-  assert.match(flat, /This module hands over only the two reads above/)
-  assert.doesNotMatch(text, /setintegritylevel/i, 'the probe is quoted in the README, never handed over here')
+  // And the rule the probe stays out of the advisory for. The probe itself is
+  // still never printed as a check; what the advisory does quote below is a
+  // REPAIR, and it is the reporter's — the distinction is stated here, at the
+  // rule, so a reader who meets both does not read one as the other.
+  assert.match(flat, /That probe is not printed here and is not offered as a check: a label write is not a read/)
+  assert.match(flat, /For that question this module hands over only the two reads above/)
+  assert.match(flat, /It does quote one label write, below, and that one is a REPAIR rather than a diagnosis/)
+  assert.match(flat, /and it is the reporter's rather than ours \(#7846/)
   assert.ok(ACL_DISCUSSIONS.includes('#8426'))
 })
 
@@ -445,20 +449,66 @@ test('the grant is described from the other side, because this module is what ha
   assert.ok(ACL_DISCUSSIONS.includes('#8312') && ACL_DISCUSSIONS.includes('#8314'), ACL_DISCUSSIONS)
 })
 
-test('the label gets no removal command, and the reason replaces it', () => {
+test('the label gets no removal command of ours, and the one it quotes is attributed', () => {
   // The one command that would remove an inheritable integrity label must not be
-  // published here. This project cannot verify a line on Windows, and an
-  // unverified removal handed to a reader is the same defect the rest of this
-  // module exists to answer — the maintainers' own diagnosis skill stops at
-  // reporting it too.
+  // published here as this project's own. This project cannot verify a line on
+  // Windows, and an unverified removal handed to a reader is the same defect the
+  // rest of this module exists to answer — the maintainers' own diagnosis skill
+  // stops at reporting it too. What changed in 0.21.0 is that a USERS' measured
+  // procedure is now quoted instead (#7846): named as theirs, shipped with its
+  // boundaries, and still not this module's own recommendation.
   const text = advisoryText(classifyProvisioningFailure(REPORTED))
   const flat = text.replace(/\s+/g, ' ')
-  assert.match(flat, /This advisory hands over no removal command/)
-  assert.match(flat, /removing an integrity label needs/)
+  // The refusal story is unchanged: the built-in skill reports and does not remove.
+  assert.match(flat, /It is also why the label is not removable by the commands above/)
+  assert.match(flat, /removing an integrity label needs WRITE_OWNER/)
   assert.match(flat, /reports `LOW_LABEL` and by design does not remove it/)
-  // `/setintegritylevel` is the command that removes one; `/grant` and `/reset`
-  // above are the DACL half and stay.
-  assert.doesNotMatch(text, /setintegritylevel/i)
+  // ...and the quoted procedure, with its attribution stated before its content.
+  assert.match(flat, /A procedure for removing all three DOES exist, and it is a user's rather than ours/)
+  assert.match(flat, /\(#7846 measured it end to end on a real tree\)/)
+  // Every step the reporter measured, each on the side of the boundary it crosses.
+  assert.match(flat, /icacls <dir> \/save <file>/)
+  assert.match(flat, /icacls <dir> \/remove:d "Everyone"/)
+  assert.match(flat, /remove the capability ACE through the ACL API/)
+  assert.match(flat, /because `icacls` cannot name that SID/)
+  assert.match(flat, /answers ERROR_NONE_MAPPED \(1332\) for it/)
+  assert.match(flat, /setintegritylevel M \/T/)
+  assert.match(flat, /which walked 85613 objects with no failures/)
+  // The three boundaries, none of which may be dropped: they are what keeps this a
+  // quotation rather than a recommendation.
+  assert.match(flat, /visits the WHOLE tree one object at a time/)
+  assert.match(flat, /EXPLICIT Medium mandatory label, not the absence of one/)
+  assert.match(flat, /needs WRITE_OWNER on each object/)
+  assert.match(flat, /This project verifies no line of it on a Windows host/)
+  assert.match(flat, /it is quoted as theirs/)
+  // The pricing asymmetry, with both quotations and the direction that was absent.
+  assert.match(flat, /What was priced when this was designed is the OTHER direction/)
+  assert.match(flat, /widens the workspace tree for ANY other process running at Low integrity/)
+  assert.match(flat, /Neither prices what #7846 measured: the user's own toolchain losing the tree/)
+  assert.match(flat, /A loosening was evaluated; this direction was not/)
+  assert.ok(ACL_DISCUSSIONS.includes('#7846'), ACL_DISCUSSIONS)
+})
+
+test('the loss is not attributed to the label, and the read-only correction is stated', () => {
+  // Two claims the advisory must NOT make, and one it must. The reporter's own
+  // measurement cannot separate the three standing entries — the recovery clears
+  // all of them at once — so attributing the lost tree to the label would be a
+  // finding dressed as a fact. And a `read-only` session writes no label at all
+  // (three layers of the seam agree), so a label found afterwards is inheritance
+  // from an earlier `workspace-write` period.
+  const text = advisoryText(classifyProvisioningFailure(REPORTED))
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /Which standing entry did the refusing is NOT settled by that report/)
+  assert.match(flat, /its recovery clears all three at once, so it cannot separate them/)
+  assert.match(flat, /this advisory does not attribute the loss to the label/)
+  assert.match(flat, /what it writes is a no-write-up label, which the sandboxed Low processes below it are stopped by/)
+  assert.doesNotMatch(flat, /the label (?:is what )?denied (?:the|your)/i, 'the label is not established as the refuser')
+  assert.match(flat, /`read-only` does not write it/)
+  assert.match(flat, /the session-scoped path returns BEFORE that point for `read-only`/)
+  assert.match(flat, /builds its sandbox with an empty writable list/)
+  assert.match(flat, /came from an EARLIER `workspace-write` period on that directory/)
+  // The three layers are named so a reader can check the claim rather than trust it.
+  assert.match(flat, /`sandbox-local\/src\/index\.ts`/)
 })
 
 test('each class explains itself instead of borrowing another class\'s story', () => {
@@ -1140,8 +1190,9 @@ test('the workspace-denial advisory shows its work, and prints no repair command
   assert.match(flat, /ERROR_NONE_MAPPED \(1332\)/)
   // The sanctioned retry is named, so the model is not nudged into it blind.
   assert.match(flat, /offers one retry of this exact command under a wider mode/)
-  // And what it does not do: no repair line at all, for the reason the standing
-  // grant section gives, and no privilege-elevation vocabulary either.
+  // And what it does not do: no repair line at all — no report has measured one for
+  // these halves, so the section states the mechanism and leaves the line to the
+  // reader — and no privilege-elevation vocabulary either.
   assert.doesNotMatch(flat, /icacls "[^"]+" \/(grant|setowner)/, 'no repair command is printed')
   assert.doesNotMatch(flat, /setintegritylevel/i)
   assert.doesNotMatch(flat, /No repair command is printed here on purpose\s*$/)

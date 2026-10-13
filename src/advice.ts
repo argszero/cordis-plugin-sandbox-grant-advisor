@@ -66,10 +66,17 @@
  *   inheritable and lives in the SACL (so resetting the DACL does not remove it),
  *   and an NTFS hard link is a second name for one file object, so a pnpm
  *   workspace's `node_modules` → content-addressed-store links carry that label
- *   out of the tree and leave it on objects other projects build from. The
- *   section offers no removal command: the maintainers' own diagnosis skill
+ *   out of the tree and leave it on objects other projects build from. It ships
+ *   no removal command of its **own** — the maintainers' own diagnosis skill
  *   reports the label and leaves it, removing one needs `WRITE_OWNER`, and this
- *   project has no Windows host on which to verify a line.
+ *   project has no Windows host on which to verify a line — and hands over the
+ *   procedure a reporter measured end to end instead (`#7846`), attributed with
+ *   its boundaries, together with the direction that was never priced: the label
+ *   was evaluated as *loosening* the tree, and what that report measured is the
+ *   user's own Medium-integrity toolchain losing it. It also states that
+ *   `read-only` writes no label, so a label found after such a session is
+ *   inheritance from an earlier `workspace-write` period rather than evidence
+ *   about the session in front of the reader.
  * - **The persistent-shell failure** (`pty-startup`) is *not* fixable by the
  *   caller — least of all by the model, which has no shell to run anything in.
  *   So its advice says so and stops: the remedy is a user-side preset choice,
@@ -311,16 +318,19 @@ import type { SandboxModeName } from './mode.js'
  * label write being refused). `#8312` and `#8314` report the other end of the
  * same backend — what its grant leaves behind once it *succeeds* — which the
  * advisory states because it is the fact a reader needs at the moment it hands
- * them the command that applies that grant. The last three arrived later and
+ * them the command that applies that grant. The last four arrived later and
  * are all inside the same advisory: `#8426` is the independent, unelevated
  * measurement of the missing `WRITE_OWNER` the diagnosis above had only ever
  * argued for, and `#8412` is a second instance of what the grant leaves behind
  * (the standing Low label reaching programs the user launches themselves).
  * `#8409` is the same backend once more and belongs to both lists: one of its
  * three defects is the provisioning failure this family explains, and another
- * is the fourth family's third branch.
+ * is the fourth family's third branch. `#7846` is the same subject from the
+ * user's side — the standing entries outliving the session on a project
+ * directory, the recovery measured by hand, and the direction the design never
+ * priced.
  */
-export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232 / #8272 / #8275 / #8312 / #8314 / #8426 / #8412 / #8409'
+export const ACL_DISCUSSIONS = '#7538 / #7622 / #7646 / #7720 / #7750 / #7735 / #7771 / #7804 / #7816 / #8232 / #8272 / #8275 / #8312 / #8314 / #8426 / #8412 / #8409 / #7846'
 
 /**
  * The upstream threads the persistent-shell advisory is a stopgap for.
@@ -746,8 +756,10 @@ function writeOwnerEvidence(): string[] {
     'So the missing right is a right on this DIRECTORY, exactly as the diagnosis above reads it: no',
     'SeRelabelPrivilege, no token privilege, no elevation anywhere in that measurement. (That probe is not printed',
     'here and is not offered as a check: a label write is not a read — where the caller already holds Full control',
-    'it succeeds, and then the label and its inheritance are written. This module hands over only the two reads',
-    'above.) The same report repaired two real trees that way — object right first, integrity label second, 9521',
+    'it succeeds, and then the label and its inheritance are written. For that question this module hands over only',
+    'the two reads above. It does quote one label write, below, and that one is a REPAIR rather than a diagnosis —',
+    'and it is the reporter\'s rather than ours (#7846, in the section on what the grant leaves behind).) The same',
+    'report repaired two real trees that way — object right first, integrity label second, 9521',
     'and 5592 objects, no failures — an order that cannot be swapped, since the second step is the one that needs',
     'what the first supplies; which is why the remedy below grants first and lets the backend write the label.',
     '',
@@ -775,14 +787,14 @@ function writeOwnerEvidence(): string[] {
  * (`tests/runner.spec.ts`, "a workspace hard link lets the grant reach an
  * external file object").
  *
- * Two things it deliberately does **not** do. It does not offer a removal
- * command: the maintainers' own diagnosis skill reports the label and leaves it,
- * removing one needs `WRITE_OWNER`, and this project has no Windows host to
- * verify a line on — shipping an unverified removal command would be the same
- * defect the rest of this module exists to answer. And it does not present the
- * out-of-tree reach as universally true: it is what happens when the workspace
- * contains hard links into a store on the same volume, which is what a pnpm
- * install produces and what the report measured.
+ * Two things it is careful about. It offers no removal command of its **own**:
+ * the maintainers' own diagnosis skill reports the label and leaves it, removing
+ * one needs `WRITE_OWNER`, and this project has no Windows host to verify a line
+ * on — so what it hands over instead is the procedure a reporter measured end to
+ * end (`#7846`), named as theirs and shipped with its boundaries. And it does
+ * not present the out-of-tree reach as universally true: it is what happens when
+ * the workspace contains hard links into a store on the same volume, which is
+ * what a pnpm install produces and what `#8314` measured.
  *
  * Emitted for every class, like {@link versionBoundary} and for the same reason:
  * the fact is about the package's grant (and the remedy the advisory hands over
@@ -805,6 +817,12 @@ function standingEdits(): string[] {
     '  `0x80000003` at startup with no output (#7709), msbuild / dotnet / npm refusing or warning about the files as',
     '  if they came from the Internet when no `Zone.Identifier` exists (#8175), a double-clicked `.exe` / `.cmd`',
     '  reporting "publisher could not be verified" (#7735).',
+    '  `read-only` does not write it. The grant and the label it carries are applied only where the seam',
+    '  materializes a writable root: the session-scoped path returns BEFORE that point for `read-only`, and the',
+    '  runner builds its sandbox with an empty writable list, so the loop that calls the label writer has nothing',
+    '  in it. A label found after a `read-only` session therefore came from an EARLIER `workspace-write` period on',
+    '  that directory, not from the `read-only` one (`sandbox-local/src/index.ts`, `sandbox-windows-acl/src/',
+    '  runner.ts`, `src/index.ts`).',
     '  It can also leave the workspace. An NTFS hard link is a SECOND NAME for one file object, so both names share',
     '  one security descriptor — and a pnpm workspace is largely hard links (`node_modules` pointing into a',
     '  content-addressed store on the same volume). An inheritable label written inside the tree therefore lands on',
@@ -814,10 +832,28 @@ function standingEdits(): string[] {
     '  backend\'s own suite pins the link reach as a known boundary — "a workspace hard link lets the grant reach an',
     '  external file object" — and its README calls refusing multiply-linked files unviable for ordinary pnpm',
     '  installs, which leaves the out-of-tree reach open rather than unknown.',
-    '  It is also why the label is not simply removable here: the built-in `diagnose-windows-sandbox-acl` skill',
-    '  (0.2.0 and later) reports `LOW_LABEL` and by design does not remove it, and removing an integrity label needs',
-    '  WRITE_OWNER — the same right this whole failure is about. This advisory hands over no removal command: the',
-    '  maintainers\' own skill does not, and an unverified one would be the defect this plugin exists to answer.',
+    '  It is also why the label is not removable by the commands above: the built-in `diagnose-windows-sandbox-acl`',
+    '  skill (0.2.0 and later) reports `LOW_LABEL` and by design does not remove it, and removing an integrity',
+    '  label needs WRITE_OWNER — the same right this whole failure is about.',
+    '  A procedure for removing all three DOES exist, and it is a user\'s rather than ours (#7846 measured it end to',
+    '  end on a real tree): back the ACLs up first (`icacls <dir> /save <file>`), drop the world deny with `icacls',
+    '  <dir> /remove:d "Everyone"`, remove the capability ACE through the ACL API — PowerShell `(Get-Acl).Access`',
+    '  filtered on the `S-1-4-x-y` identity, `RemoveAccessRule`, `Set-Acl` — because `icacls` cannot name that SID',
+    '  at all and answers ERROR_NONE_MAPPED (1332) for it, then relabel with `icacls <dir> /setintegritylevel M',
+    '  /T`, which walked 85613 objects with no failures. Read its three boundaries before running it: the relabel',
+    '  visits the WHOLE tree one object at a time; what it leaves behind is an EXPLICIT Medium mandatory label, not',
+    '  the absence of one, so it stops the refusal without restoring the original state; and it needs WRITE_OWNER on',
+    '  each object, which a reader who is not the owner is refused exactly as above. This project verifies no line',
+    '  of it on a Windows host — the measurement is the reporter\'s, and it is quoted as theirs.',
+    '  What was priced when this was designed is the OTHER direction. The decision record\'s cost line says the',
+    '  standing Low label "widens the workspace tree for ANY other process running at Low integrity as the same',
+    '  user", and the package README\'s known limitations say it plainer — such a process "can write and delete',
+    '  inside the workspace, where a Medium label would have denied it". Neither prices what #7846 measured: the',
+    '  user\'s own toolchain losing the tree. A loosening was evaluated; this direction was not. Which standing',
+    '  entry did the refusing is NOT settled by that report — its recovery clears all three at once, so it cannot',
+    '  separate them — and this advisory does not attribute the loss to the label: what it writes is a no-write-up',
+    '  label, which the sandboxed Low processes below it are stopped by, not the user\'s Medium-integrity ones',
+    '  above it.',
     'None of this makes the command above the wrong move — without it, nothing sandboxed runs in this workspace. It',
     'is what the harness does to a directory it has been pointed at, and it is worth knowing before rather than',
     'discovering it as a broken build in some other project later.',
