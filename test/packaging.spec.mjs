@@ -209,6 +209,16 @@ test('the shipped bundle patch describes the family the advice module covers, an
   // smaller family than the plugin covers, and drops the one recovery it has.
   assert.ok(/THE ROOT ITSELF REFUSED/.test(patch), 'the bundle patch does not describe the fourth family\'s third branch')
   assert.ok(/restart the desktop/i.test(patch), 'the bundle patch never names the recovery the third branch has')
+  // …and since 0.22.0 that second branch covers TWO shapes, which a reader who
+  // stops at the breadth will miss. The patch has to carry the read that separates
+  // them, and it has to say whose the one relabel command in it is — the patch is
+  // where a mounting operator reads the family first, and an attributed proposal
+  // read as this plugin's remedy is the confidently wrong cause in the other
+  // direction.
+  assert.ok(/NEITHER — no ACE and no\s+#\s+label/.test(patch), 'the bundle patch does not describe the wider shape the second breadth covers')
+  assert.ok(/Breadth is the first cut, not the last: ask the read\s+#\s+whenever the root still writes\./.test(patch), 'the bundle patch does not hand over the read that separates the two shapes')
+  assert.ok(/recorded as the\s+#\s+reporter's/.test(patch), 'the bundle patch prints a relabel command without saying whose it is')
+  assert.ok(/ERROR_NONE_MAPPED 1332, a ceiling that extends to the removal side/.test(patch), 'the bundle patch drops the ceiling that bounds the proposed relabel')
   // The fifth family's whole remedy is one environment change, and its two
   // producers are the fact a maintainer needs: a mount instruction that describes
   // the refusal without either would leave the reader with a diagnosis and no way

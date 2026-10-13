@@ -869,7 +869,7 @@ the single shape that happened to be measured first. It never
 offers `danger-full-access` as a fix and never suggests a sandbox setting be
 relaxed.
 
-### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0; the branches it forks into in 0.13.0 and 0.14.0)
+### 4. Denied inside the workspace (`workspace-denial`, added in 0.11.0; the branches it forks into in 0.13.0 and 0.14.0, the breadth of the second in 0.22.0)
 
 [#423] is one report and its own follow-up, and it is the **other end of the
 backend §1 is about**. There the workspace grant could not be applied at all and
@@ -941,7 +941,16 @@ reading of its own sandbox, not a guess about a line of output.
   rest of the tree writes normally is the DACL branch, **nothing below the root
   writable at all** with the root itself the only writable place is the label
   branch, and **the root itself refused** — nothing writable, not even the root —
-  is a third branch with a different cause and a different remedy (below). A
+  is a third branch with a different cause and a different remedy (below).
+  Breadth is the **first cut, not the last** (widened in 0.22.0 from [#9559]): the
+  second of those breadths covers **two** shapes, and one `icacls` read of a child
+  separates them. The child may carry the capability ACE with **no Mandatory Label
+  line** (the label branch above), or it may carry **neither** — no ACE and no
+  label — in which case the whole security-descriptor write missed it rather than
+  one half of it. The report measured the second on a **pre-existing project
+  tree**: every write below the root denied, a write **at** the root succeeding,
+  and the child holding nothing at all. So whenever the root itself still writes,
+  the advisory tells the reader to ask the read rather than trust the breadth. A
   Low-integrity child may write to a directory only if that directory's own label
   is Low — the kernel's no-write-up check runs *in addition to* the access check
   — so a DACL that is perfect everywhere changes nothing. [#8383] measured it on
@@ -979,6 +988,22 @@ reading of its own sandbox, not a guess about a line of output.
   one), which empties the map and lets the next provision read the DACL, find the
   ACE absent and write it — the reporter measured exactly that ("restarting the
   desktop brings it back").
+- **The repair a reporter proposed, quoted as theirs** (added in 0.22.0, from
+  [#9559]). Re-labelling the whole tree with
+  `icacls "<root>" /setintegritylevel (OI)(CI)Low /T` is recorded as **the
+  reporter's** move and offered as **no remedy of this plugin's**, because it was
+  not measured on a host this project owns. Three boundaries travel with it. It relabels the
+  **whole tree**, including objects that were never denied, so the change is not
+  scoped to the failing path. It cannot name the derived capability SID any more
+  than the grant side can — `ERROR_NONE_MAPPED` (**1332**) is the ceiling, and it
+  applies to the **removal** direction too, so taking the label back off later
+  meets the same wall. And once the tree is Low it is writable by **every**
+  Low-integrity process on the machine, not only this session's: the label belongs
+  to the directory, and the sandbox is not the only Low writer there. The same
+  report measures a **false repair** worth knowing: rewriting a child's own DACL —
+  even writing only the user's entry — makes Windows **recompute** that child's
+  inherited ACEs, so the missing capability ACE then *appears* and the write is
+  still denied. The DACL "fixed" the read and the label kept refusing the write.
 - **No repair command.** The obvious one, a recursive `icacls /grant` for the
   capability SID, is refused by Windows itself with `ERROR_NONE_MAPPED` (1332) —
   the tool cannot map that SID to a name, so a grant that must name it never
@@ -1005,12 +1030,27 @@ inside the session's own workspace. That is why the family reads the mode off
 the **value** (the executor stamped the mode it actually ran under, so no policy
 lookup can disagree with it), tests containment against the root the policy
 resolver reports, and speaks only when **every** absolute path the command's own
-arguments name lies under that root. A command that names an outside path as
+arguments name lies **strictly below** that root (narrowed in 0.22.0). A command
+that names an outside path as
 well — an interpreter under `C:\Program Files`, an output directory on another
 volume — is refused rather than guessed at, and so is a command naming only
 relative paths: in both cases the plugin cannot say *which* path was denied, and
-silence is the fail-closed direction. The platform gate is real here and cannot
+silence is the fail-closed direction. The same standard applies to a command
+naming the **root itself**: the family's account is about a *descendant* that
+missed an inherited ACE, so a denial naming the root is the third branch's fact
+(the harness's own standing grant gone from the root's DACL) and the failure text
+**declines it** rather than lending it the descendant's explanation. Widening
+recognition is cheap; widening a claim past the mechanism it rests on is this
+plugin's whole subject. The platform gate is real here and cannot
 be dropped: the mechanism is ACE inheritance, which no other backend has.
+
+**Where the defect is.** In the harness backend, not in the session's choices:
+the grant **and** the label go out in one security-descriptor write on the root,
+in the expectation that Windows inherits them downward, and the objects that
+missed them are never revisited because the idempotency check that would notice
+returns early on the root. Nothing reachable from inside a session repairs that.
+This plugin only **diagnoses** it — it edits no ACL, elevates nothing, and
+repairs nothing.
 
 **On a denial it cannot finish placing** — a root the policy resolver does not
 report, or no mounted policy service at all — the plugin withholds the advisory
@@ -1679,6 +1719,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#1847]: https://github.com/deepseek-ai/deepseek-harness/discussions/1847
 [Discussion #9170]: https://github.com/deepseek-ai/deepseek-harness/discussions/9170
 [#9467]: https://github.com/deepseek-ai/deepseek-harness/discussions/9467
+[#9559]: https://github.com/deepseek-ai/deepseek-harness/discussions/9559
 [#9463]: https://github.com/deepseek-ai/deepseek-harness/discussions/9463
 [#9471]: https://github.com/deepseek-ai/deepseek-harness/discussions/9471
 [#7846]: https://github.com/deepseek-ai/deepseek-harness/discussions/7846

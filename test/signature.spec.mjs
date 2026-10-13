@@ -31,6 +31,7 @@ import {
   failureLine,
   hasWorkspaceDenialStamp,
   isInsideWorkspace,
+  isWorkspaceRoot,
   STATUS_DLL_INIT_FAILED,
   TEMP_ROOT_ASSERTION,
   windowsPathsIn,
@@ -1062,6 +1063,44 @@ test('containment folds case and separators, and never by prefix of a sibling na
   assert.equal(isInsideWorkspace('', 'D:\\ws\\a'), false, 'an unknown root contains nothing')
 })
 
+test('the family\'s claim is about a DESCENDANT, so the root itself is excluded', () => {
+  // `isInsideWorkspace` folds root-or-below because that is the right test for
+  // "was this denial somewhere the sandbox should have allowed". The family's own
+  // account is narrower still: the grant is written ON the root, so a denial
+  // naming the root is a different fact (the standing grant gone from the root's
+  // own DACL) and reading it as a skipped descendant would be the confidently
+  // wrong cause. These two assertions are the pair — the root is inside, and it
+  // is not a descendant — and the classifier applies both, so neither check can
+  // be deleted as redundant.
+  assert.equal(isInsideWorkspace('D:\\ws', 'D:\\ws'), true, 'the root is inside the workspace')
+  assert.equal(isWorkspaceRoot('D:\\ws', 'D:\\ws'), true, 'and it IS the root')
+  // The root in its other spellings: a trailing separator or another case is not
+  // a different object, which is the same normalisation the containment test does.
+  for (const [root, path] of [
+    ['D:\\ws', 'D:\\ws\\'],
+    ['D:\\ws\\', 'D:\\ws'],
+    ['D:\\ws', 'd:/WS'],
+    ['D:\\ws', 'D:/WS/'],
+  ]) {
+    assert.equal(isWorkspaceRoot(root, path), true, `${path} names ${root}`)
+  }
+  // Everything below it, and every near-miss the containment test refuses: a
+  // sibling whose name merely starts with the root's name is neither inside nor
+  // the root.
+  for (const [root, path] of [
+    ['D:\\ws', 'D:\\ws\\logs'],
+    ['D:\\ws', 'D:\\ws\\logs\\app.log'],
+    ['D:\\ws', 'd:/WS/Logs/App.Log'],
+    ['D:\\ws', 'D:\\ws-other\\a'],
+    ['D:\\ws', 'C:\\ws\\a'],
+    ['D:\\ws', 'D:\\wsx'],
+    ['', 'D:\\ws'],
+    ['D:\\ws', ''],
+  ]) {
+    assert.equal(isWorkspaceRoot(root, path), false, `${path} is not ${root}`)
+  }
+})
+
 test('the denial stamp is read from the executors\' own projection, and only there', () => {
   assert.equal(hasWorkspaceDenialStamp(denied()), true)
   // Everything the producers do NOT stamp is refused, one field at a time.
@@ -1110,6 +1149,17 @@ test('every narrowing that keeps a denial from being this family is a refusal, n
   // Only relative paths: no literal to test, so nothing is claimed.
   assert.equal(at({ command: 'mkdir logs && cat logs/app.log' }), undefined)
   assert.equal(at({ command: 'echo hello' }), undefined)
+  // The ROOT itself is not a descendant: the grant is written ON it, so a denial
+  // naming it is the standing-grant branch (#8409) rather than a skipped child,
+  // and the failure text declines instead of lending it this explanation.
+  assert.equal(at({ command: `icacls "${WORKSPACE_ROOT}"` }), undefined)
+  assert.equal(at({ command: `cmd /c "echo hi >> ${WORKSPACE_ROOT}"` }), undefined)
+  assert.equal(at({ command: `cmd /c "echo hi >> ${WORKSPACE_ROOT}\\"` }), undefined, 'nor in its trailing-separator spelling')
+  // …and ONE root-naming path among descendants is enough to refuse the whole
+  // call: which of them the sandbox refused is exactly what the plugin cannot say.
+  assert.equal(at({ command: `cmd /c "type ${INSIDE} && del ${WORKSPACE_ROOT}"` }), undefined)
+  // The immediate child is the boundary the other way: it IS a descendant.
+  assert.equal(at({ command: `cmd /c "type ${WORKSPACE_ROOT}\\logs"` })?.family, 'workspace-denial')
   assert.equal(at({}), undefined, 'arguments without a command string')
   assert.equal(at({ command: 42 }), undefined)
   // The other narrowings, which live in the stamp.
@@ -1159,6 +1209,13 @@ test('the workspace-denial advisory shows its work, and prints no repair command
   assert.match(flat, /BREADTH IS THE FIRST CUT/)
   assert.match(flat, /A HANDFUL of stubborn objects while the rest of the tree writes normally → the DACL half/)
   assert.match(flat, /NOTHING below the root is writable at all[^.]*→ the LABEL half/)
+  // …and since 0.22.0 it says out loud that the first cut is not the last: the
+  // second breadth covers TWO shapes, the wider one measured by #9559, and the
+  // discriminator between them is a read rather than an inference.
+  assert.match(flat, /TWO shapes share that breadth, and one `icacls` read separates them \(#9559\)/)
+  assert.match(flat, /it carries NEITHER — no ACE and no label — in which case the whole write missed it/)
+  assert.match(flat, /Ask the read, not the breadth, whenever the root still writes\./)
+  assert.match(flat, /measured its widest form: a child that existed before the grant/)
   assert.match(flat, /Half one — the DACL ACE did not reach the object/)
   assert.match(flat, /Half two — the DACL arrived and the LABEL did not \(#8383, measured 2026-09-30\)/)
   // The third branch (#8409): the root's own standing grant gone, the provider's
@@ -1188,19 +1245,41 @@ test('the workspace-denial advisory shows its work, and prints no repair command
   assert.match(flat, /S-1-16-4096/)
   // The Windows ceiling that closes the obvious repair.
   assert.match(flat, /ERROR_NONE_MAPPED \(1332\)/)
+  // The command a REPORTER proposed is quoted as theirs, with its boundaries, and
+  // is the only command-shaped line in the text — the absence pin below is kept in
+  // that narrower form on purpose: what this plugin must never do is offer a
+  // remedy of its OWN, and printing someone else's with the attribution and the
+  // reasons it is bounded is the honest version of that.
+  assert.match(flat, /#9559's reporter proposed the other way out for the two propagation halves/)
+  assert.match(flat, /recorded here as THEIRS and not as a verified\s*move/)
+  assert.match(flat, /`icacls "<root>" \/setintegritylevel \(OI\)\(CI\)Low \/T`/)
+  assert.equal((flat.match(/setintegritylevel/gi) ?? []).length, 1, 'exactly one, and only in the attribution')
+  assert.match(flat, /it applies to the REMOVAL direction as well/)
+  assert.match(flat, /writable by EVERY Low-integrity process on the machine/)
+  // The measurement that keeps a reader from believing a DACL rewrite repaired
+  // anything: Windows recomputes the inherited ACEs, so the missing ACE APPEARS
+  // while the write stays refused.
+  assert.match(flat, /makes Windows RECOMPUTE that child's inherited ACEs/)
+  assert.match(flat, /the next reader sees a grant that is present and a denial that persists/)
+  // And where the defect is, stated rather than implied.
+  assert.match(flat, /Where the defect is: in the harness backend, not in this session's choices\./)
+  assert.match(flat, /this plugin only diagnoses it/)
   // The sanctioned retry is named, so the model is not nudged into it blind.
   assert.match(flat, /offers one retry of this exact command under a wider mode/)
-  // And what it does not do: no repair line at all — no report has measured one for
-  // these halves, so the section states the mechanism and leaves the line to the
-  // reader — and no privilege-elevation vocabulary either.
+  // And what it does not do: no repair line of its own — no report has measured one
+  // for these halves, so the section states the mechanism and leaves the line to
+  // the reader — and no privilege-elevation vocabulary either.
   assert.doesNotMatch(flat, /icacls "[^"]+" \/(grant|setowner)/, 'no repair command is printed')
-  assert.doesNotMatch(flat, /setintegritylevel/i)
   assert.doesNotMatch(flat, /No repair command is printed here on purpose\s*$/)
   assert.match(flat, /No repair command is printed here on purpose/)
   assert.match(flat, /no Windows host to verify one on/)
   // The stopgap line, and the boundary that says when it stays silent.
   assert.match(flat, new RegExp(WORKSPACE_DENIAL_DISCUSSIONS))
   assert.match(flat, /only when the mode is `workspace-write`, the host is Windows/)
+  // The gate as narrowed in 0.22.0, and the reason for the narrowing.
+  assert.match(flat, /every path the command names lies strictly BELOW the workspace root/)
+  assert.match(flat, /a denial naming the ROOT ITSELF is the standing-grant branch rather than a\s*skipped descendant/)
+  assert.match(flat, /so this text declines it rather than explain it wrongly/)
 })
 
 test('the fourth family names itself, and borrows none of the other three stories', () => {

@@ -410,8 +410,23 @@ export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / 
  * third branch's source and a report of the DACL half as well: the workspace
  * root's own standing grant can be gone, and the layer that would re-apply it
  * consults a per-lifetime map instead of the DACL, so nothing notices.
+ *
+ * `#9559` is the second branch's SECOND shape, and it is the report that makes
+ * that branch wider than the label alone: on an existing project tree every
+ * write below the root is denied while a write AT the root succeeds, and the
+ * child carries **neither** half — no capability ACE and no Mandatory Label
+ * line — so the propagation did not reach it at all rather than reaching it
+ * with one of the two. That is the shape the DACL half's own explanation does
+ * not cover, and it is why a single `icacls <root>\<sub>` read now separates
+ * the branch's two shapes before any repair is attempted. The report also
+ * supplies the measurement that explains the temporary relief a DACL write
+ * gives: rewriting a child's DACL makes Windows recompute its inherited ACEs,
+ * so the capability ACE appears in it — while the integrity label does not, and
+ * the write stays denied. Its suggestion for a fix is recorded as a suggestion
+ * and not as a measurement (this project has no Windows host), which is why no
+ * line from it is printed.
  */
-export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383 / #8421 / #8409'
+export const WORKSPACE_DENIAL_DISCUSSIONS = '#423 / #8383 / #8421 / #8409 / #9559'
 
 /**
  * The upstream thread the temp-root advisory is a stopgap for.
@@ -1294,13 +1309,23 @@ function ptyAdvisory(failure: PtyStartupFailure, mode: SandboxModeName, tool?: s
  * reader is entitled to audit it. It must give the **two-sided** reachability
  * rule, since a check that only looks for the capability ACE reports an object
  * as granted when the read side is refused as well. And it must split the
- * diagnosis into its **two branches** — the DACL entry that did not arrive, and
- * the mandatory-integrity LABEL that did not (#8383) — because from inside a
- * session they are indistinguishable, both are permanent for the same
- * root-only-short-circuit reason, and a reader who repairs the wrong half has
- * learned nothing. The fork is placed on **breadth**, which is the one fact the
- * reader already has: a handful of stubborn objects is the DACL branch, and
- * nothing below the root writable at all is the label branch.
+ * diagnosis into its **branches** — the DACL entry that did not arrive, the
+ * mandatory-integrity LABEL that did not (#8383), and the standing grant missing
+ * from the root itself (#8409) — because from inside a session they are
+ * indistinguishable, all are permanent for the same root-only-short-circuit
+ * reason, and a reader who repairs the wrong one has learned nothing. The first
+ * fork is placed on **breadth**, which is the one fact the reader already has: a
+ * handful of stubborn objects is the DACL branch, and nothing below the root
+ * writable at all is a propagation branch. Breadth is the FIRST cut and not the
+ * last: when the root itself still writes, one `icacls` read of a child settles
+ * whether the label is missing alone or NOTHING was propagated at all — the
+ * wider shape #9559 measured on a pre-existing project tree, where the child
+ * carries neither half.
+ *
+ * Every named path is **strictly below** the root in the text this builds on:
+ * the classifier declines a denial that names the root itself
+ * (`isWorkspaceRoot`), because that is the standing-grant branch rather
+ * than a skipped descendant and this account cannot place it.
  *
  * What it must not do is print a repair command. For the DACL branch the obvious
  * one is refused by Windows with `ERROR_NONE_MAPPED` (1332) — a capability SID
@@ -1340,6 +1365,9 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  The host-side grant is written ONCE, on the workspace ROOT, and relies on Windows ACE inheritance to reach',
     '  everything beneath it. Writing an inherited ACE into an ALREADY-EXISTING child needs WRITE_DAC on that child;',
     '  where the caller does not hold it, Windows skips the child silently — no error, no return value, no log line.',
+    '  The gap is at least that wide, and #9559 measured its widest form: a child that existed before the grant',
+    '  carries NEITHER half — no capability ACE and no label — so on such an object nothing was propagated at all,',
+    '  not one half of the two. Either way it is silent.',
     '  The backend then checks only the root (`hasExactGrant(workspaceRoot)`) and returns early when the grant is',
     '  already there, which it is from the first call onwards. The descendants that missed the propagation are',
     '  therefore never revisited — not later in this session, not in any later one — so the identical command keeps',
@@ -1370,6 +1398,12 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '    (#8383). A Low-integrity child may write to a directory only when that directory\'s own mandatory-integrity',
     '    label is Low as well; the kernel runs its no-write-up check IN ADDITION to the access check, so a DACL that',
     '    is perfect everywhere changes nothing.',
+    '  - NOTHING below the root is writable, the root itself still writable, and the pre-existing children predate the',
+    '    grant → TWO shapes share that breadth, and one `icacls` read separates them (#9559). Either the child carries',
+    '    the capability ACE with no Mandatory Label line (the label half just above), or it carries NEITHER — no ACE',
+    '    and no label — in which case the whole write missed it, not one half of the two. The second is the wider',
+    '    failure and is what a project tree that existed before the session tends to show; the first is what a tree',
+    '    the harness itself created shows. Ask the read, not the breadth, whenever the root still writes.',
     '  - THE ROOT ITSELF IS REFUSED — nothing writes, the root included, and work that used to succeed here now',
     '    does not → NEITHER half above (#8409). The standing grant is gone from the root\'s own DACL, and the layer',
     '    that would put it back has stopped looking. Two things about this branch are different in kind from the',
@@ -1455,6 +1489,19 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '  The third branch is not closed by this ceiling and does not need to be: there is nothing to write by hand',
     '  there — the grant that went missing is the harness\'s own, and all that has to happen is for the layer holding',
     '  the map to look at the DACL again, which the restart in half three is what makes it do.',
+    '  #9559\'s reporter proposed the other way out for the two propagation halves — re-label the tree with',
+    '  `icacls "<root>" /setintegritylevel (OI)(CI)Low /T` — and it is recorded here as THEIRS and not as a verified',
+    '  move, because it was not measured on a host this project owns. Three things bound it. It relabels the WHOLE',
+    '  TREE, including the objects that were never denied, so the change is not scoped to the failing path. It cannot',
+    '  name the derived capability SID any more than the grant side can: `ERROR_NONE_MAPPED` (1332) is the ceiling, and',
+    '  it applies to the REMOVAL direction as well, so taking the label back off later runs into the same wall. And',
+    '  once the tree is Low it is writable by EVERY Low-integrity process on the machine, not only this session\'s —',
+    '  the label belongs to the directory and the sandbox is not the only Low writer there.',
+    '  One measurement of the reporter\'s is worth keeping for a different reason: rewriting a child\'s own DACL, even',
+    '  when the entry written is only the user\'s, makes Windows RECOMPUTE that child\'s inherited ACEs — so the missing',
+    '  capability ACE then APPEARS in it, and the write is still denied. That is a false repair: the read that "fixed"',
+    '  things was the DACL, the refusal came from the other half, and the next reader sees a grant that is present and',
+    '  a denial that persists.',
     '',
     'What helps:',
     '  - The move that is yours, and the only one available inside the session: write new files under a directory the',
@@ -1486,8 +1533,14 @@ function workspaceDenialAdvisory(failure: WorkspaceDenialFailure, tool?: string,
     '',
     'How to read this: the denial names no cause and points at no repair, so the diagnosis is delivered here instead.',
     'This is a stopgap, ' + where + '. This plugin speaks only when the mode is `workspace-write`, the host is',
-    'Windows, and every path the command names lies inside the workspace — a denial anywhere else is the sandbox',
-    'working as designed, and a confident wrong cause is worse than no answer.',
+    'Windows, and every path the command names lies strictly BELOW the workspace root — a denial anywhere else is the',
+    'sandbox working as designed, and a denial naming the ROOT ITSELF is the standing-grant branch rather than a',
+    'skipped descendant, so this text declines it rather than explain it wrongly. A confident wrong cause is worse',
+    'than no answer.',
+    'Where the defect is: in the harness backend, not in this session\'s choices. The grant AND the label go out in',
+    'one security-descriptor write on the ROOT, in the expectation that Windows inherits them downward, and the',
+    'objects that missed them are never revisited — the idempotency check that would notice returns early on the',
+    'root. Nothing reachable from inside this session repairs that; this plugin only diagnoses it.',
     'What it is NOT: this plugin does not edit an ACL, does not elevate, and does not offer `danger-full-access` as a',
     'fix.',
   ].join('\n')

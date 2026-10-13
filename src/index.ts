@@ -82,7 +82,8 @@
  * tool's own canonical output, never a line of rendered text — and which three
  * narrowings keep the recognition from firing on something else.
  *
- * **Denied inside the workspace (Windows ACL, `#423`).** The fourth family is
+ * **Denied inside the workspace (Windows ACL, `#423`; the breadth of its second
+ * branch widened in `#9559`).** The fourth family is
  * the other half of the backend the first one explains, and it is the first
  * whose remedy is withheld on purpose. There the grant could not be applied at
  * all; here it *was* applied — on the workspace root, once — and Windows ACE
@@ -90,7 +91,11 @@
  * The backend's provisioning check short-circuits on the root (`hasExactGrant`
  * returns early once the root carries the ACE, `sandbox-windows-acl/src/acl.ts`),
  * so those descendants are never revisited and the same command fails forever,
- * while a directory the harness itself created works. It arrives at the same
+ * while a directory the harness itself created works. `#9559` measured the widest
+ * form of that skip on a pre-existing project tree: a child holding **neither**
+ * half of the write — no capability ACE and no label — with the root itself still
+ * writable, so the two breadths the advisory forks on are not the whole answer and
+ * one `icacls` read of a child has to finish the placement. It arrives at the same
  * seam as the native-init family and for the same structural reason: a denied
  * command exits nonzero and the shipped shell tools report that as a finished
  * run, so the fact is in `ToolExecutionSuccess.value` rather than in an error.
@@ -100,7 +105,10 @@
  * stderr), so this plugin reads the harness's own reading of its own sandbox.
  * See `src/signature.ts` for the facts that narrow it, and in particular for
  * why a denial is the *designed* outcome in three other situations (outside the
- * workspace, under `read-only`, a runner failure) and must never be advised.
+ * workspace, under `read-only`, a runner failure) and must never be advised; and
+ * for the fourth narrowing, `isWorkspaceRoot` — the account is about a
+ * DESCENDANT that missed an inherited ACE, so a denial naming the root itself is
+ * declined rather than explained.
  *
  * **The private temp root inside the workspace (`temp-root-inside-workspace`,
  * `#9175`).** The fifth family is the only one that takes **every** command with

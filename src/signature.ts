@@ -866,6 +866,35 @@ export function isInsideWorkspace(root: string, path: string): boolean {
 }
 
 /**
+ * Whether a path IS the workspace root, in any of its spellings.
+ *
+ * The fourth family's whole account is that the propagation skipped a
+ * **descendant** of the root: the grant is written on the root itself, so a
+ * denial whose named path IS the root is a different fact — the standing grant
+ * missing from the root's own DACL (#8409) — and one this text cannot place.
+ * {@link isInsideWorkspace} deliberately reads the root as inside (that is the
+ * right test for "was this somewhere the sandbox should have allowed"), so the
+ * narrowing is written here as its own check rather than as a stricter
+ * containment test: the two lines then cover two different cases — a path
+ * outside the workspace, and a path that is the root — and neither implies the
+ * other. Reading the root as a skipped descendant would let the standing-grant
+ * branch through wearing the descendant's explanation. Widening recognition is
+ * cheap; widening a claim past what its mechanism supports is the defect this
+ * plugin exists to answer, and the cost of declining here is only that a
+ * root-only denial stays unexplained rather than mis-explained.
+ * @param root - the session's workspace root.
+ * @param path - the path the denied command named.
+ * @returns true when `path` names `root` itself.
+ */
+export function isWorkspaceRoot(root: string, path: string): boolean {
+  const canon = (value: string): string => value.replaceAll('/', '\\').replace(/\\+$/, '').toLowerCase()
+  const base = canon(root)
+  const target = canon(path)
+  if (base.length === 0 || target.length === 0) return false
+  return target === base
+}
+
+/**
  * Whether one settled value carries the executors' workspace-denial stamp.
  *
  * The **structural half** of the fourth family's recognition, split out so that
@@ -902,14 +931,18 @@ export function hasWorkspaceDenialStamp(value: unknown): boolean {
  * Classify one **successful** execution's canonical value as a workspace-internal
  * denial, and recover the paths the call named.
  *
- * Four facts, in the order they narrow: the call ran on Windows (the mechanism
+ * Five facts, in the order they narrow: the call ran on Windows (the mechanism
  * is ACE inheritance, which no other backend has); the value carries the
  * executor's denial stamp ({@link hasWorkspaceDenialStamp}); the call's
- * `command` argument carries at least one absolute Windows path literal; and
- * **all** of them lie under the workspace root. The last is the one that
+ * `command` argument carries at least one absolute Windows path literal; **all**
+ * of them lie under the workspace root; and **none** of them IS the root itself
+ * ({@link isWorkspaceRoot}). The fourth is the one that
  * separates this family from the sanctioned escalation path — a command naming
  * any path outside its own workspace is refused rather than guessed at, because
- * the plugin cannot say which path the sandbox refused.
+ * the plugin cannot say which path the sandbox refused. The fifth narrows the
+ * claim to the objects it can actually place: a denial naming the ROOT is the
+ * standing grant missing from the root's own DACL, not a skipped descendant, and
+ * the failure text declines rather than lend the descendant's explanation to it.
  * @param value - the settled execution's canonical value (`ToolExecutionSuccess.value`).
  * @param args - the settled call's parsed arguments (`ToolExecution.arguments`).
  * @param facts - the host platform and the session's workspace root.
@@ -928,6 +961,7 @@ export function classifyWorkspaceDenial(
   const named = windowsPathsIn(command)
   if (named.length === 0) return undefined
   if (!named.every(path => isInsideWorkspace(facts.workspaceRoot, path))) return undefined
+  if (named.some(path => isWorkspaceRoot(facts.workspaceRoot, path))) return undefined
   const exitCode = typeof probe.exitCode === 'number' && Number.isInteger(probe.exitCode) ? probe.exitCode : null
   return {
     family: 'workspace-denial',

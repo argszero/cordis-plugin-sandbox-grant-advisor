@@ -123,6 +123,14 @@ test('a denial inside the workspace turns a "successful" call into the diagnosis
     assert.match(body, /Half three — the standing grant is gone from the ROOT itself \(#8409/)
     assert.match(body, /RESTART IT/)
     assert.match(body, /#8421/, 'the label half cites its second instance')
+    // 0.22.0: the second breadth is not the last cut, and the report behind that
+    // widening is named — with its proposed command quoted as THEIRS.
+    assert.match(body, /TWO shapes share that breadth, and one `icacls` read separates them \(#9559\)/)
+    assert.match(body, /Ask the read, not the breadth, whenever the root still writes/)
+    assert.match(body, /carries NEITHER half — no capability ACE and no label/)
+    assert.match(body, /#9559's reporter proposed the other way out/)
+    assert.match(body, /recorded here as THEIRS and not as a verified/)
+    assert.match(body, /Where the defect is: in the harness backend/)
 
     // The gate asked the real resolver once, for this agent's own session.
     assert.equal(policy.calls.length, 1, 'one resolution per recognized failure')
@@ -193,6 +201,40 @@ test('a command the plugin cannot place — no absolute path, or an outside one 
       assert.equal(contexts(result).length, 0, `must stay silent for: ${command}`)
       assert.equal(logText(logged), '')
     }
+  })
+})
+
+test('a denial naming the ROOT itself is declined, not explained as a skipped descendant', async () => {
+  await onWindows(async () => {
+    // The family's account is that the grant, written ON the root, failed to
+    // reach something BELOW it. A denial whose named path IS the root is a
+    // different fact — the harness's own standing grant gone from the root's own
+    // DACL (#8409) — and this text cannot place it. Silence here is the
+    // fail-closed direction, and it is NOT the withholding case: nothing about
+    // this call is unknown, it is simply not this family.
+    for (const command of [
+      `cmd /c "echo hi >> ${WORKSPACE_ROOT}"`,
+      `icacls "${WORKSPACE_ROOT}"`,
+      `cmd /c "type ${INSIDE} && del ${WORKSPACE_ROOT}"`,
+    ]) {
+      const { ctx, logged } = await denialWorld()
+      const result = await call(ctx, 'bash', { command })
+      assert.equal(result.isError, false)
+      assert.equal(contexts(result).length, 0, `must decline for: ${command}`)
+      assert.equal(logText(logged), '', 'and not file it as "could not tell" either')
+    }
+  })
+})
+
+test('a denial strictly below the root is still this family, one level down included', async () => {
+  await onWindows(async () => {
+    // The boundary the other way, end to end: the nearest descendant is inside
+    // the claim, so a narrowing that swallowed it would be a silent regression of
+    // the whole family rather than a tightening of it.
+    const { ctx } = await denialWorld()
+    const result = await call(ctx, 'bash', { command: `cmd /c "echo hi >> ${WORKSPACE_ROOT}\\logs"` })
+    assert.equal(contexts(result).length, 1)
+    assert.match(contexts(result)[0].content.map(block => block.text).join('\n'), /Denied inside your own workspace/)
   })
 })
 

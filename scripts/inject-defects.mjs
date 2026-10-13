@@ -491,6 +491,111 @@ const MUTATIONS = [
     edits: [['  if (!named.every(path => isInsideWorkspace(facts.workspaceRoot, path))) return undefined', '  /* containment is not checked */']],
   },
   {
+    // 0.22.0's narrowing, and the one this family's mechanism forces: the grant is
+    // written ON the root, so a denial naming the root is the standing-grant branch
+    // (#8409) and not a descendant that missed an inheritance. Dropping it makes
+    // the text explain a root denial with the descendant's story — the confidently
+    // wrong cause both directions of this plugin exist to refuse.
+    name: 'the root-equality guard is dropped, so a denial of the ROOT itself is explained as a skipped descendant',
+    file: 'src/signature.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['  if (named.some(path => isWorkspaceRoot(facts.workspaceRoot, path))) return undefined', '  /* the root itself is accepted */']],
+  },
+  {
+    // And the predicate it rests on. A comparison that answers "yes" for anything
+    // under a known root declines the whole family; one that answers "no" for the
+    // root hands the standing-grant branch the descendant's explanation. Both are
+    // caught, which is what makes the pair load-bearing rather than decorative.
+    name: 'the root-equality predicate stops comparing, so every path under a known root IS the root',
+    file: 'src/signature.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['  return target === base', '  return base.length > 0 && target.length > 0']],
+  },
+  {
+    name: 'the root-equality predicate never answers yes, so the guard it feeds is inert',
+    file: 'src/signature.ts',
+    arms: 'signature.spec.mjs',
+    edits: [['  if (base.length === 0 || target.length === 0) return false\n  return target === base', '  if (base.length === 0 || target.length === 0) return false\n  return false']],
+  },
+  {
+    // The widening 0.22.0 shipped: without it the second breadth reads as the label
+    // half alone, and a reader whose child carries NEITHER half repairs a DACL that
+    // was never written rather than the write that never happened.
+    name: 'the wider shape under the second breadth is dropped, so "nothing below the root" reads as the label half only',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '    the capability ACE with no Mandatory Label line (the label half just above), or it carries NEITHER — no ACE',",
+      "    '    the capability ACE with no Mandatory Label line (the label half just above). That is the only shape here,',",
+    ]],
+  },
+  {
+    // Breadth is the first cut, and saying so is what sends the reader to the read.
+    name: 'the read rule is replaced by "the breadth is enough", so the two shapes are never told apart',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '    the harness itself created shows. Ask the read, not the breadth, whenever the root still writes.',",
+      "    '    the harness itself created shows. The breadth is enough; no further read is needed.',",
+    ]],
+  },
+  {
+    // The widest form is the report's own measurement, and the reason the widened
+    // branch exists; without it the branch is prose without a source.
+    name: 'the widening\'s source is dropped, so the fourth bullet states a shape no report measured',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  The gap is at least that wide, and #9559 measured its widest form: a child that existed before the grant',",
+      "    '  The gap is at most that wide: a child that existed before the grant may carry the grant itself anyway,',",
+    ]],
+  },
+  {
+    // The one command-shaped line in the whole advisory. Its attribution is what
+    // separates "here is what a reporter proposed" from "here is the remedy" — the
+    // failure mode this plugin was built against, in the other direction.
+    name: 'the reporter\'s relabel is presented as this plugin\'s own remedy',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  `icacls \"<root>\" /setintegritylevel (OI)(CI)Low /T` — and it is recorded here as THEIRS and not as a verified',",
+      "    '  `icacls \"<root>\" /setintegritylevel (OI)(CI)Low /T` — the way out, verified by this project and offered as its',",
+    ]],
+  },
+  {
+    // The measurement that stops a reader believing a DACL rewrite repaired
+    // anything: the ACE appears and the write stays refused.
+    name: 'the false-repair measurement is dropped, so a DACL rewrite reads as a fix that did not hold',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    '  when the entry written is only the user\\'s, makes Windows RECOMPUTE that child\\'s inherited ACEs — so the missing',",
+      "    '  when the entry written is only the user\\'s, leaves the child\\'s inherited ACEs exactly as they were — so the missing',",
+    ]],
+  },
+  {
+    // Where the defect lives. A diagnosis that leaves the reader thinking they
+    // misconfigured their session is a different piece of advice.
+    name: 'the core-defect attribution is dropped, so the failure reads as the session\'s own configuration',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'Where the defect is: in the harness backend, not in this session\\'s choices. The grant AND the label go out in',",
+      "    'How to read this is your call: nothing above is a defect in the product. The grant and the label go out in',",
+    ]],
+  },
+  {
+    // The gate as narrowed in 0.22.0, restated where the reader decides whether
+    // this text is about them at all.
+    name: 'the stated gate widens back to root-or-below, contradicting what the classifier now accepts',
+    file: 'src/advice.ts',
+    arms: 'signature.spec.mjs',
+    edits: [[
+      "    'Windows, and every path the command names lies strictly BELOW the workspace root — a denial anywhere else is the',",
+      "    'Windows, and every path the command names lies inside the workspace root — a denial anywhere else is the',",
+    ]],
+  },
+  {
     // The disclosure rule: a root the resolver cannot report is a decision the host
     // log has to account for, or silence reads as "the sandbox is not the cause".
     name: 'an unresolvable workspace root is withheld silently instead of disclosed',
