@@ -162,6 +162,17 @@ test('the tarball carries the entry, its modules, the bundle patch, and the type
   for (const required of ['package.json', 'lib/index.js', 'lib/signature.js', 'lib/advice.js', 'lib/state.js', 'lib/mode.js', 'lib/types/index.d.ts', 'lib/types/signature.d.ts', 'lib/types/mode.d.ts', 'cordis.patch.yml', 'README.md', 'LICENSE']) {
     assert.ok(paths.has(required), `npm pack omits ${required} (declared in "files"): ${[...paths].join(', ')}`)
   }
+  // `tools/` is pointed at from three published carriers — the README's own text,
+  // the bundle patch's header, and the native-init advisory's rendered advice — so a
+  // `files` list that leaves it out publishes a package whose every pointer to it
+  // resolves to nothing on the reader's disk. The list is read from the directory
+  // rather than written here: a script added to `tools/` and not declared is the same
+  // defect one release later.
+  const instruments = [...readdirSync(join(ROOT, 'tools')).filter(name => name.endsWith('.mjs')).map(name => `tools/${name}`), 'tools/README.md']
+  assert.ok(instruments.length >= 7, `expected the instruments and their README on disk, saw ${instruments.join(', ')}`)
+  for (const required of instruments) {
+    assert.ok(paths.has(required), `npm pack omits ${required} (declared in "files"): ${[...paths].join(', ')}`)
+  }
   assert.ok(![...paths].some(path => path.startsWith('test/') || path.startsWith('src/') || path.startsWith('scripts/')), 'source, tests and scripts stay unpublished')
 })
 

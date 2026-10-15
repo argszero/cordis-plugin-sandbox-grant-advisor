@@ -1332,6 +1332,84 @@ const MUTATIONS = [
       ["other Low-integrity processes, and what #7846 measured is the user's own", "other Low-integrity processes, and what that measured is the user's own"],
     ],
   },
+  {
+    // The instruments were promised in the thread twice and shipped in 0.25.0. An
+    // advisory that stops naming where they are published leaves a reader holding a
+    // number they cannot re-run — which is the whole reason the directory is here.
+    name: 'the native-init advisory stops pointing at the shipped instruments',
+    file: 'src/advice.ts',
+    arms: 'tools.spec.mjs',
+    edits: [[
+      "'     reported in: `tools/` holds the module-loading hook over the shipped runner, the default-DACL dump,'",
+      "'     reported in: the comment it came from holds the module-loading hook over the shipped runner, the default-DACL dump,'",
+    ]],
+  },
+  {
+    // The one figure that circulated for the materialiser's step was written without
+    // tallying the closure and was wrong; the directory exists so the script prints
+    // it instead of prose carrying it. Writing a number back down is that defect.
+    name: 'the instruments README states a closure size instead of reading it off the script',
+    file: 'tools/README.md',
+    arms: 'tools.spec.mjs',
+    edits: [['so **this file states no number**.', 'so **this file states 25 packages**.']],
+  },
+  {
+    // The file table is how a reader finds a script by name; a row naming a file that
+    // is not in the directory is a promise the tarball does not keep.
+    name: 'the instruments README\'s file table names a script the directory does not carry',
+    file: 'tools/README.md',
+    arms: 'tools.spec.mjs',
+    edits: [['| `dump-dacl.mjs` | issuecomment-6170010818 |', '| `dump-dacl-2.mjs` | issuecomment-6170010818 |']],
+  },
+  {
+    // An arm the hook implements and the README never lists is one a reader will not
+    // run — the same set checked from the other side than the row above.
+    name: 'the instruments README drops an arm the hook implements',
+    file: 'tools/README.md',
+    arms: 'tools.spec.mjs',
+    edits: [[
+      '| `rl-synth` | adds the synthetic SID to the **restricting list**, DACL untouched | `0` under `--mode read-only`, `0xC0000142` under `--mode workspace-write` |\n',
+      '',
+    ]],
+  },
+  {
+    // The "own header" column is a claim about each script, and the blanket version of
+    // it was offered in the thread and corrected by its own author. Nothing keeps the
+    // column honest except reading the files, which is what this mutation falsifies.
+    name: 'the instruments README claims a script repeats its own invocation when it defers',
+    file: 'tools/README.md',
+    arms: 'tools.spec.mjs',
+    edits: [['| defers to this README |', '| carries its invocation |']],
+  },
+  {
+    // The provenance block is the whole basis on which a copy of someone else's script
+    // is defensible here: who wrote it, where it was offered, and that the body is not
+    // this project's edit. Losing the author line leaves an unattributed copy.
+    name: 'a shipped instrument loses its author line',
+    file: 'tools/hook.mjs',
+    arms: 'tools.spec.mjs',
+    edits: [[
+      "// Author: Ethan-H1K, who offered these scripts in this repository's issue #1 and gave credit in the same thread.\n",
+      '',
+    ]],
+  },
+  {
+    // The comment id is what lets a reader check the body against the comment it came
+    // from; a wrong one sends them to a post that does not contain the script.
+    name: 'a shipped instrument\'s provenance names the wrong comment',
+    file: 'tools/dump-dacl.mjs',
+    arms: 'tools.spec.mjs',
+    edits: [['issues/1#issuecomment-6170010818', 'issues/1#issuecomment-6170010819']],
+  },
+  {
+    // The arm table's first column is the value the hook switches on, so a renamed case
+    // label makes every row naming the old one unrunnable while the table still looks
+    // complete.
+    name: 'the probe hook renames an arm the instruments README documents',
+    file: 'tools/hook.mjs',
+    arms: 'tools.spec.mjs',
+    edits: [['case "rl-synth": return src.replace(RESTRICT_ANCHOR, RESTRICT_SYNTH);', 'case "rl-synth-only": return src.replace(RESTRICT_ANCHOR, RESTRICT_SYNTH);']],
+  },
 ]
 
 let silent = 0

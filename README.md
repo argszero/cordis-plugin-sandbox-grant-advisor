@@ -894,6 +894,19 @@ Three producers have been measured under a confining mode:
    So the advisory reads the outcome as `(mode × host × build)` and marks the third
    dimension **not measured to be identical**.
 
+   **The instruments that measurement was run with are in this repository, not in
+   the thread.** Every arm above was driven by a Node module-loading hook over the
+   shipped runner — with a default-DACL dump, a bootstrap that can allocate a
+   console first, and a materialiser that lets a plain `node.exe` host the runner
+   where the packaged executable's `app.asar` is unreadable to it. All of it is
+   under [`tools/`](tools/README.md), which says what each arm is for and which
+   number it reproduces. The scripts are the reporter's, copied unedited with a
+   provenance header naming the comment each came from, so an arm can be re-run
+   rather than taken on trust; the count of packages the materialiser copies is read
+   out of that script's own output rather than written down anywhere, because the
+   one figure that circulated for it was written without tallying the closure and
+   was wrong.
+
    **And the switch costs something, which the backend's README states.** Under
    `read-only` PowerShell cannot create its AppLocker probe files in temp and
    conservatively starts in **ConstrainedLanguage**, where `Add-Type`, non-core

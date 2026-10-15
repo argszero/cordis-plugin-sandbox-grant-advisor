@@ -35,7 +35,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 
 /** What is copied into the scratch tree; everything else is not needed to test. */
-const COPIED = ['src', 'test', 'tsconfig.json', 'README.md', 'LICENSE', 'cordis.patch.yml']
+const COPIED = ['src', 'test', 'tools', 'tsconfig.json', 'README.md', 'LICENSE', 'cordis.patch.yml']
 
 /**
  * The harness packages installed at the probed line.

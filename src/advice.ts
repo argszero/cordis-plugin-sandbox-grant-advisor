@@ -441,6 +441,17 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * `Everyone`), and the restricting-list rule this plugin announced in `0.20.0` is
  * withdrawn — its reporter retracted it in `#9467` before the publish, and the
  * comment that derived it is no longer there.
+ * `0.25.0` moves the instruments those arms were run with into the repository's
+ * `tools/` — the module-loading hook over the shipped runner, the default-DACL and
+ * token-group dumps, the bootstrap that can allocate a console first, and the
+ * materialiser that lets a plain `node.exe` host the runner — and points the
+ * advisory at them instead of at a comment inside a thread, so an arm can be
+ * re-run by a reader who was not in the conversation. The scripts are their
+ * author's, copied unedited with a provenance header naming the comment each came
+ * from, and `tools/README.md` says what each arm is for and which number it
+ * reproduces; the count of packages the materialiser copies is read out of that
+ * script's own output rather than written down, because the one figure that
+ * circulated for it was written without tallying the closure.
  *
  * `#9626` is the fourth wave's second isolation of producer 2, and it is narrower
  * than the ones before it: the token recipe, the grants, the stdio shapes, the
@@ -1273,6 +1284,11 @@ function nativeInitAdvisory(
     '     `Everyone` at full access, merged by the backend, beside Administrators, SYSTEM and the logon SID at',
     '     `0x10000000`, all three unused-by-the-merge and ambient, identical to the unrestricted process\'s — so',
     '     the merge EXTENDS this default DACL; it did not replace an ambient half on that machine.',
+    '     The instruments that measurement used are in this repository rather than in the thread it was',
+    '     reported in: `tools/` holds the module-loading hook over the shipped runner, the default-DACL dump,',
+    '     the bootstrap that can allocate a console first, and the materialiser that lets a plain node.exe host',
+    '     the runner, each with the arm it is for and the number it reproduces (`tools/README.md`) — so an arm',
+    '     can be re-run rather than believed.',
     '',
     '     Read the result as `(mode × host × build)`, because the third axis is open. This measurement is one',
     '     build (Windows 10 19045), and its own reporter asked for it to be recorded that way rather than folded',

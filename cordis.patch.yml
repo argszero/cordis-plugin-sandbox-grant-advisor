@@ -201,7 +201,17 @@
 # it (either recovers alone), and the build axis is left open, because the
 # measurement is one build and the family has another (#8721, the same
 # packaged-desktop shape filed from Windows 11 26200, whose arms vary no
-# default-DACL input at all). The same wave isolates the
+# default-DACL input at all). Since 0.25.0 the INSTRUMENTS those arms were run with
+# are in this repository rather than in a comment inside the thread: the
+# module-loading hook over the shipped runner, the default-DACL dump, the bootstrap
+# that can allocate a console first, and the materialiser that lets a plain
+# node.exe host the runner, all under tools/ with a README (tools/README.md) saying
+# what each arm is for and which number it reproduces. They are their author's,
+# copied unedited with a provenance header naming the comment each came from; the
+# count of packages the materialiser copies is read out of that script's own
+# output, because the figure that circulated for it in the thread was written
+# without tallying the closure and was wrong.
+# The same wave isolates the
 # desktop-host producer one input narrower — only the image hosting the runner
 # varied, the packaged Electron binary against a real node.exe (#9626) — and names
 # the line where that image is chosen: `[process.execPath, runner.js]`, whose own
