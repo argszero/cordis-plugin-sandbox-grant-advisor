@@ -736,23 +736,49 @@ Three producers have been measured under a confining mode:
    `read-only ? [logonSid, world] : [logonSid, world, ...writeSids]`), so
    `read-only` carries none **by design**.
 
-   **Since `0.20.0` that input has a rule, and the rule is what makes the producer
-   structural rather than tunable.** [`#9467`] changed only the *third* entry of the
-   restricting list inside one host and got the same child, sixteen times over: it
-   dies with `0xC0000142` **exactly when the list carries a SID that is not an
-   enabled group of the token being restricted**. EVERYONE, `S-1-5-4`, `S-1-5-11`
-   and `S-1-5-32-545` are groups of the token and start it; the write SIDs
-   (`S-1-4-*`), `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and `S-1-16-4096` are not, and
-   kill it. Two consequences follow, and both are stated in the advisory:
+   **Since `0.20.0` that input had a rule, and `0.24.0` withdraws it.** [`#9467`]
+   changed only the *third* entry of the restricting list inside one host and got the
+   same child sixteen times over, and this README published it as *"it dies with
+   `0xC0000142` **exactly when the list carries a SID that is not an enabled group of
+   the token being restricted**"*. Its own reporter retracted that conclusion in the
+   same thread **before** this advisory published it, and the comment that derived it
+   is no longer in the thread to re-read. Two rows already in the arm set falsify the
+   sentence outright rather than trimming it: `read-only` puts the synthetic non-group
+   SID **inside the restricting list** and the child **starts**, while `workspace-write`
+   keeps the capability SID inside the list **and** names it in the merged ACE and the
+   child **dies**. List membership is therefore neither sufficient nor necessary, and
+   what the sentence was reading was not the list's composition.
 
-   - **No setting repairs it.** The write SIDs are *derived from a path* —
-     `S-1-4-x-y`, with the private temp one at `S-1-4-x-y-1`
-     (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID can never
-     be an enabled group of a token. So under `workspace-write` the token that may
-     write is the token that cannot start the child, while `read-only`, carrying no
-     such SID, starts it and simply does not write.
-   - **Self-rescue is refused.** Adding the capability SID to the token's own groups
-     fails: `SetTokenInformation(TokenGroups)` → Win32 error 87.
+   **What replaced it is the trustee of the ACE the grant merges, and the statement
+   has three parts.** Measured by the reporter in [`#9626`]'s thread on Windows 10
+   19045, console-less packaged mediator, `workspace-write`, with arms that separate
+   the parts:
+
+   - the SID the merged ACE names must be an **enabled group of the restricted
+     token** — `S-1-5-32-544` (Administrators) is `0x10`,
+     `SE_GROUP_USE_FOR_DENY_ONLY`, with no `0x4`, and it dies even on the arm that
+     carries it in the restricting list;
+   - that SID must **also be carried in the restricting list** — `S-1-5-4` and
+     `S-1-5-11` are enabled groups of this token and die when named alone, and the same
+     arm recovers the moment the SID is added to the list;
+   - the list must **still carry the logon SID and `EVERYONE`** — three removal arms
+     die, one of them with a named trustee that is enabled *and* in the list.
+
+   The one-part form this README carried until `0.24.0` — **the absence of a trustee
+   the restricted token itself holds** — is necessary and not sufficient, and
+   `EVERYONE` is not the only trustee measured recovering: `S-1-5-4` does too, once it
+   is also in the list.
+
+   **One consequence of the withdrawn rule survives on its own footing.** The write
+   SIDs are *derived from a path* — `S-1-4-x-y`, with the private temp one at
+   `S-1-4-x-y-1` (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID
+   can never be an enabled group of a token, so the shipped `workspace-write` call
+   names a trustee that fails the **first** part whenever a temp directory exists. That
+   is what the baseline row sees, and it is why no setting repairs it: recovering means
+   naming an enabled group in that call, which is a change to the backend rather than a
+   knob a user has. (The `SetTokenInformation(TokenGroups)` refusal beside the rule
+   came from the withdrawn comment and is no longer re-readable, so the advisory no
+   longer cites it.)
 
    The build number is not the variable here: this family had only ever been
    measured on Windows 11 26200, and [`#9467`] reproduced the whole structure on
@@ -817,9 +843,33 @@ Three producers have been measured under a confining mode:
      capability ACE left exactly where it is with `Everyone` added beside it also
      reaches exit `0`.
 
-   So the failing input is not *"an ACE with a synthetic name was merged"* but the
-   **absence of a trustee the restricted token itself holds**, which is what the
-   mode asymmetry actually forbids. The same measurement dumps
+   So the failing input is not *"an ACE with a synthetic name was merged"*, and it is
+   not one property either: **since `0.24.0` the statement is a conjunction of three
+   parts**, measured by the same reporter next, each part with its own violating arm:
+
+   - the SID the merged ACE names must be an **enabled group of the restricted token**
+     — `S-1-5-32-544` (Administrators) is `0x10`,
+     `SE_GROUP_USE_FOR_DENY_ONLY`, with no `0x4`, and it dies even on the arm that
+     carries it in the restricting list;
+   - that SID must **also be carried in the restricting list** — `S-1-5-4` and
+     `S-1-5-11` are enabled groups of this token and die when named alone, and the same
+     arm recovers the moment the SID is added to the list;
+   - the list must **still carry the logon SID and `EVERYONE`** — three removal arms
+     die, one of them (`rl-named-interactive-no-world`) with a named trustee that is
+     enabled *and* in the list.
+
+   **The one-part form this README carried until `0.24.0` — the absence of a trustee
+   the restricted token itself holds — is necessary and not sufficient**, and
+   `EVERYONE` is not the only trustee measured recovering: `S-1-5-4` recovers too, once
+   it is also in the list. The second part also reopens an argument [`#9336`] used to
+   set a write-restricted reading aside — that argument said if the failing check were
+   write-restricted, `INTERACTIVE` would fail too, and it runs; it runs **only once the
+   same SID is in the restricting list**, and dies when it is not. The reporter marks
+   that correspondence as **their reading rather than a measurement**, and it is quoted
+   that way: nobody has traced `AccessCheck` on this path, and no traced reading
+   replaces the withdrawn argument.
+
+   The same measurement dumps
    `GetTokenInformation(TokenDefaultDacl)` from inside the confined child and finds
    four entries — `Everyone` at full access, merged by the backend, beside
    Administrators, SYSTEM and the logon SID at `0x10000000`, all three ambient and
@@ -832,9 +882,10 @@ Three producers have been measured under a confining mode:
    EPERM`). The advisory still says not to delete it, and now says why the arm that
    succeeded did not have to.
 
-   **Two boundaries ride with the rule.** First, the **console is a conjunction**
-   with it: on that machine the failure is *(no console) AND (no universally-held
-   trustee in the default DACL)*, and either one alone recovers — the same pair
+   **Two boundaries ride with the statement.** First, the **console is a conjunction**
+   with it: on that machine the failure is *(no console) AND (a merged grant that
+   misses one of those three parts)*, and either one alone recovers — a console alone
+   returns `0` whatever the DACL names, which is the same pair
    [`#9336`] filed, read from the token's side rather than from the host's. Second,
    the **build axis is open**, and the measurement's own reporter asked for it to be
    recorded that way rather than folded into the rule: it is one build (Windows 10
@@ -902,13 +953,20 @@ Three producers have been measured under a confining Windows mode. Check which o
      CHECK, in TWO STEPS — the first alone does not settle it. Step 1: ... change only the MODE ...
      Step 2: establish whether the runner OWNS A CONSOLE, because producer 2 fails the very same switch ...
 
-     Since 0.20.0 there is a RULE for which input does it: the child dies exactly when the restricting list
-     carries a SID that is NOT an enabled group of the token (16 of 16 arms, #9467, on Windows 10 19044).
-     The write SIDs are DERIVED FROM A PATH, and a path-derived SID is never an enabled group of any token —
-     so this producer cannot be tuned away, and adding the SID to the token's groups is refused (Win32 87).
+     Since 0.20.0 there WAS a RULE for which input does it, and 0.24.0 WITHDRAWS it: its own reporter
+     retracted that conclusion in #9467 before the publish, and what replaces it is the trustee of the ACE
+     the default-DACL call merges, not the restricting list's composition. Three parts must hold: the SID
+     the merged ACE names must be an ENABLED GROUP of the token; that SID must ALSO be carried in the
+     restricting list; and the list must STILL carry the logon SID and EVERYONE. The one-part form this
+     copy used to state alone — the absence of a trustee the token itself holds — is necessary and NOT
+     sufficient.
+     The write SIDs are DERIVED FROM A PATH, and a path-derived SID is never an enabled group of any token,
+     so the shipped workspace-write call names a trustee that fails the FIRST part whenever a temp directory
+     exists. That is why no setting repairs it: recovering means naming an enabled group in that call, which
+     is a change to the backend.
 
-     A second candidate sits on the SAME token and is NOT the restricting list: the token's DEFAULT DACL ...
-     it is a CANDIDATE and not an answer — nobody has measured it ...
+     A second input sits on the SAME token and is NOT the restricting list: the token's DEFAULT DACL ...
+     since 0.23.0 it is MEASURED rather than a candidate — which SID that call names is the input ...
 
 Do not retry this call: the environment has not changed, and the identical call produces the identical code.
 

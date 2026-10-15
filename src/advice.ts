@@ -140,14 +140,37 @@
  *   only its trustee changed. Naming `Everyone` recovers, naming the capability SID
  *   fails, and the arm that decides it is the one that names **both**: the
  *   capability ACE left in place with `Everyone` beside it also recovers. So the
- *   failing input is not "an ACE with a synthetic name was merged" but **whether the
- *   default DACL names a trustee the restricted token itself holds** — which is what
- *   makes the shipped name the failing one, and what the mode asymmetry actually
- *   forbids. Two further arms bound it: removing the write SIDs from the restricting
+ *   failing input is not "an ACE with a synthetic name was merged", and it is not
+ *   one property either: `0.24.0` carries the **conjunction of three** the same
+ *   reporter measured next, because each part alone predicts rows that die. The SID
+ *   the merged ACE names must be an **enabled group** of the restricted token (the
+ *   ambient `Administrators` entry is `SE_GROUP_USE_FOR_DENY_ONLY` — `0x10`, with no
+ *   `0x4` — and dies even on the arm that carries it in the list); that SID must
+ *   **also be carried in the restricting list** (`S-1-5-4` and `S-1-5-11` are
+ *   enabled groups of this token and die when named alone, and the same arm recovers
+ *   the moment the SID is added to the list); and that list must **still carry the
+ *   logon SID and `Everyone`** (three removal arms die, including one whose named
+ *   trustee is enabled *and* in the list). The one-part form this file carried until
+ *   `0.24.0` — "the absence of a trustee the restricted token itself holds" — is
+ *   therefore necessary and not sufficient, and `Everyone` is not the only trustee
+ *   measured recovering.
+ *   The second part reopens an argument this file used to set a write-restricted
+ *   reading aside: it said that if the failing check were write-restricted,
+ *   `INTERACTIVE` would fail too, and it runs. It runs only *once the same SID is in
+ *   the restricting list*, and dies when it is not — the correspondence the reporter
+ *   draws between their first two parts and the pass-2 predicate, which they mark as
+ *   their reading rather than a measurement. Nobody has traced `AccessCheck` on this
+ *   path; what is measured is the conjunction, and the withdrawn argument is not
+ *   replaced by a traced one.
+ *   Two further arms bound it: removing the write SIDs from the restricting
  *   list does **not** recover (a different input, which is why this is not producer
  *   3 again), and the console axis is a **conjunction** with this one — on the
- *   machine that was measured the failure is *(no console) AND (no universally-held
- *   trustee in the default DACL)*, and either alone recovers. The measurement dumps
+ *   machine that was measured the failure is *(no console) AND (no SID named by the
+ *   merged ACE satisfying those three parts)*, and either alone recovers. The
+ *   keep-alive property the removal arms test is now **measured** rather than
+ *   untested: naming `Everyone` while removing the logon SID dies, naming `Everyone`
+ *   while removing `Everyone` from the list dies, and naming `S-1-5-4` — enabled and
+ *   in the list — while removing `Everyone` dies as well. The measurement dumps
  *   `TokenDefaultDacl` from inside the confined child too: the merge EXTENDS the
  *   default DACL (three ambient trustees survive it), so the "merge dropped the
  *   ambient half" reading does not apply there. It was measured on ONE build and the
@@ -177,20 +200,25 @@
  *   want of that variable. A withdrawn cause earns its sentence because this
  *   advisory shipped it twice; a confidently wrong cause is worse than two named
  *   ones with one shared remedy.
- *   Since `0.20.0` this producer's input has a **rule** rather than one measurement, and
- *   `#9467` produced it by changing only the third entry of the restricting list inside one
- *   host: a confined child dies with `0xC0000142` **exactly when the list carries a SID that
- *   is not an enabled group of the token being restricted** — 16 of 16 arms. EVERYONE,
- *   `S-1-5-4`, `S-1-5-11` and `S-1-5-32-545` are groups of the token and start the child;
- *   `S-1-4-*` (the real derived values), `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and
- *   `S-1-16-4096` are not, and kill it. That is what turns this producer from a knob into a
- *   structure: the write SIDs are DERIVED FROM A PATH — `S-1-4-x-y`, and its temp sibling
- *   `S-1-4-x-y-1` (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID can
- *   never be an enabled group of a token, so `workspace-write` cannot both grant the write and
- *   start the child, whatever the settings. #9467 measured that on Windows 10 19044, so the
- *   build number is not the variable and the rule is a measurement rather than an inference.
- *   The same comment closed the one self-rescue left: adding the capability SID to the
- *   token's groups is REFUSED — `SetTokenInformation(TokenGroups)` → Win32 error 87.
+ *   Since `0.20.0` this file carried a **rule** for this producer's input, derived in `#9467` by
+ *   changing only the third entry of the restricting list inside one host: a confined child dies
+ *   exactly when the list carries a SID that is not an enabled group of the token being
+ *   restricted — 16 of 16 arms, a count whose comment is no longer in that thread. `0.24.0`
+ *   **withdraws** the rule: its own reporter retracted it in that thread before this advisory
+ *   published it, and the retraction is the measurement that separates the parts — the two
+ *   inputs are a conjunction rather than a sole condition. Two rows already in this issue's arm
+ *   set falsify the sentence instead of trimming it: `read-only` with the synthetic non-group
+ *   SID *inside the list* starts the child, and `workspace-write` with the capability SID inside
+ *   the list *and* named by the merged ACE dies. List membership is therefore neither sufficient
+ *   nor necessary, and the input is the trustee of the ACE the default-DACL call merges — the
+ *   conjunction of three above.
+ *   What does not rest on the retracted rule is where that call's SID comes from: the write SIDs
+ *   are DERIVED FROM A PATH — `S-1-4-x-y`, and its temp sibling `S-1-4-x-y-1`
+ *   (`sandbox-windows-acl/src/workspace-sid.ts`) — and a path-derived SID can never be an
+ *   enabled group of a token, so the shipped `workspace-write` call names a trustee that fails
+ *   part (a) whenever a temp directory exists. That is what the `baseline` arm sees, and making
+ *   it recover means naming an enabled group in that call — a change to the backend rather than
+ *   a knob a user has.
  *   Two reports in that wave are carried as SCOPE, and only as scope. `#9463` shows the same
  *   backend STALLING before any child is spawned at all (no `approval/request`, no process) —
  *   a third shape of one backend rather than this family. `#9471` shows a child that DOES
@@ -407,6 +435,12 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * of the `read-only` cost the advisory now states (ConstrainedLanguage) and of
  * the default-DACL candidate — which `0.23.0` promotes out of candidacy, because a
  * user measured it and the measurement named which half of it was the input.
+ * `0.24.0` narrows that half once more, on the same reporter's next arms: the
+ * statement is a conjunction of three parts (an enabled group of the token, carried
+ * in the restricting list as well, and a list that still carries the logon SID and
+ * `Everyone`), and the restricting-list rule this plugin announced in `0.20.0` is
+ * withdrawn — its reporter retracted it in `#9467` before the publish, and the
+ * comment that derived it is no longer there.
  *
  * `#9626` is the fourth wave's second isolation of producer 2, and it is narrower
  * than the ones before it: the token recipe, the grants, the stdio shapes, the
@@ -421,13 +455,14 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * separately.
  *
  * `#9467` and `#9463` are the third wave, filed on Windows 10 19044 and Windows 11
- * 26200 on one day. `#9467` is the one that made this producer a rule rather than a
- * measurement: varying only the third entry of the restricting list inside a single
- * host, it showed the child dies exactly when that entry is not an enabled group of
- * the token (16 of 16 arms), and that adding a capability SID to the token's groups
- * to escape the state is refused (`SetTokenInformation(TokenGroups)` → Win32 error
- * 87). Its build number matters as much as its rule: this family had only ever been
- * measured on 26200, and the same structure reproduces on 19044. `#9463` is the
+ * 26200 on one day. `#9467` is the thread whose restricting-list rule this advisory
+ * carried from `0.20.0` and **withdraws** in `0.24.0`: the reporter retracted it there
+ * before the publish, and its two inputs are a conjunction rather than a sole
+ * condition — the rule's own figures (16 of 16 arms, and the `SetTokenInformation` /
+ * error 87 refusal beside it) come from a comment that is no longer in the thread.
+ * What the wave does settle is independent of the rule: this family had only ever
+ * been measured on 26200, and the same structure reproduces on 19044, so the build
+ * number is not the variable. `#9463` is the
  * scope half — the same backend stalling before any child is spawned at all (no
  * `approval/request`, no process), which is neither this family nor any of the
  * others, and is carried so a reader knows the shape exists without this advisory
@@ -1182,17 +1217,20 @@ function nativeInitAdvisory(
     '     One thing this is NOT: `.NET`. Pure-native programs die here identically, so the "self-contained .NET',
     '     runtime" cause the earlier reports attracted is retired by that control arm.',
     '',
-    '     Since 0.20.0 there is a RULE for which input does it, measured by changing only the third entry of the',
-    '     restricting list inside one host, and it holds 16 of 16 arms: the child dies exactly when the list',
-    '     carries a SID that is NOT an enabled group of the token being restricted. EVERYONE, `S-1-5-4`,',
-    '     `S-1-5-11` and `S-1-5-32-545` are groups of the token and start it; the write SIDs (`S-1-4-*`),',
-    '     `S-1-0-0`, `S-1-3-*`, `S-1-5-32-544` and `S-1-16-4096` are not, and kill it. That is also why this',
-    '     producer cannot be tuned away: the write SIDs are DERIVED FROM A PATH (`S-1-4-x-y`, the temp one',
-    '     `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any token — so the token that may',
-    '     write is the token that cannot start the child, while `read-only`, which carries no such SID, starts it',
-    '     and simply does not write. Escaping it by adding the capability SID to the token\'s own groups is',
-    '     REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. #9467 measured all of this on',
-    '     Windows 10 19044, so the build number is not the variable here.',
+    '     Since 0.20.0 there was a RULE for which input does it, and 0.24.0 WITHDRAWS it: it was derived from',
+    '     changing only the third entry of the restricting list inside one host, it claimed 16 of 16 arms, and',
+    '     its own reporter retracted it in that thread before this advisory published it — the comment that',
+    '     carried it is no longer there to re-read. What falsifies it is already in this issue\'s arm set, and',
+    '     it is not a hair: `read-only` puts the synthetic non-group SID INSIDE the list and the child starts,',
+    '     while `workspace-write` keeps the capability SID inside the list and names it in the merged ACE and',
+    '     the child dies. List membership is therefore neither sufficient nor necessary, and the sentence',
+    '     "dies exactly when the list carries a SID that is not an enabled group" is not the input.',
+    '     What survives is where the merged appointee comes from: the write SIDs are DERIVED FROM A PATH',
+    '     (`S-1-4-x-y`, the temp one `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any',
+    '     token — so the shipped `workspace-write` call names a trustee that fails part (a) whenever a temp',
+    '     directory exists, which is what the baseline row sees, and recovering means naming an enabled group',
+    '     in that call. That is a backend change and not a knob a user has; the metric below is unchanged.',
+    '     #9467 was filed on Windows 10 19044, so the build number is not the variable here.',
     '',
     '     A second input sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL. It',
     '     was carried here as a candidate until #9626 measured it, and the measurement is quoted as ITS',
@@ -1213,9 +1251,23 @@ function nativeInitAdvisory(
     '     Node module-loading hook over the shipped runner, so the ACE stayed where it was and only its trustee',
     '     changed. Naming `Everyone` there SUCCEEDS; naming the capability SID fails; and the arm that settles',
     '     which half is the input names BOTH — the capability ACE left exactly where it is with `Everyone` added',
-    '     beside it also reaches exit 0. So what fails is not "an ACE with a synthetic name was merged" but the',
-    '     absence of a trustee the restricted token itself holds, which is what the mode asymmetry above actually',
-    '     forbids. Two arms bound it: taking the write SIDs back OUT of the restricting list does not recover',
+    '     beside it also reaches exit 0. So what fails is not "an ACE with a synthetic name was merged", and it',
+    '     is not a single property either. Since 0.24.0 the statement is a CONJUNCTION OF THREE, measured by the',
+    '     same reporter on the same machine with arms that separate the parts: (a) the SID the merged ACE names',
+    '     must be an ENABLED group of the restricted token — `Administrators` is the counterexample, `0x10`',
+    '     (SE_GROUP_USE_FOR_DENY_ONLY) with no `0x4`, and it dies even on the arm that carries it in the list;',
+    '     (b) that SID must ALSO be carried in the restricting list — `S-1-5-4` and `S-1-5-11` are enabled',
+    '     groups of this token and die when named alone, and the same SID added to the list recovers; (c) the',
+    '     list must STILL carry the logon SID and `Everyone` — three removal arms die, one of them with a named',
+    '     trustee that is enabled AND in the list. The one-part property this text carried until 0.24.0, "the',
+    '     absence of a trustee the restricted token itself holds", is necessary and NOT sufficient, and',
+    '     `Everyone` is not the only trustee measured recovering.',
+    '     Part (b) reopens the argument that used to set a write-restricted reading aside: this text said that if',
+    '     the failing check were write-restricted, `INTERACTIVE` would fail too, and it runs. It runs only once',
+    '     the same SID is in the restricting list, and dies when it is not — the correspondence the reporter',
+    '     draws to that predicate, offered as their reading rather than as a measurement. Nobody has traced',
+    '     `AccessCheck` on this path, and no traced reading replaces the withdrawn argument.',
+    '     Two arms bound it: taking the write SIDs back OUT of the restricting list does not recover',
     '     either (a different input — this is not producer 3 measured twice), nor does dropping the integrity-level',
     '     lowering. And the dump of `TokenDefaultDacl` from inside the confined child shows four entries —',
     '     `Everyone` at full access, merged by the backend, beside Administrators, SYSTEM and the logon SID at',
@@ -1224,10 +1276,11 @@ function nativeInitAdvisory(
     '',
     '     Read the result as `(mode × host × build)`, because the third axis is open. This measurement is one',
     '     build (Windows 10 19045), and its own reporter asked for it to be recorded that way rather than folded',
-    '     into a rule: the failure there is *(no console) AND (no universally-held trustee in the default DACL)*',
-    '     — either one alone recovers, which is #9336\'s pair seen from the token\'s side rather than from the',
-    '     host\'s. A second build files the same packaged-desktop shape (#8721, Windows 11 26200) and varies no',
-    '     default-DACL input at all, so the build axis is NOT measured to be the same and is marked open.',
+    '     into a rule: the failure there is *(no console) AND (a merged grant that misses one of those three',
+    '     parts)* — a console, or a grant that holds all three, each recovers alone, which is #9336\'s pair seen',
+    '     from the token\'s side rather than from the host\'s. A second build files the same packaged-desktop',
+    '     shape (#8721, Windows 11 26200) and varies no default-DACL input at all, so the build axis is NOT',
+    '     measured to be the same and is marked open.',
     '     The build dimension does not change the one thing not to do here: do not delete that ACE to test any of',
     '     this: it is load-bearing for every piped grandchild spawn, which is also why the arm above adds a',
     '     trustee to it rather than taking one away.',

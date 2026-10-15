@@ -70,9 +70,14 @@
  * synthetic SID) and the reason it must not be deleted to test it. `0.23.0` promotes
  * that candidate: `#9626` measured it by rewriting only the SID the merge names, and
  * the arm that names the capability SID AND `Everyone` together recovers — so the
- * input is the absence of a trustee the restricted token holds rather than the
- * presence of a synthetic one — bounded by the console as a *conjunction* (either
- * recovers alone) and by the build axis left open. The same report isolates
+ * input is a property of the merged ACE's trustee rather than the presence of a
+ * synthetic one. `0.24.0` then narrows that to what the same reporter measured next,
+ * a **conjunction of three** — the named SID must be an enabled group of the token,
+ * must also be carried in the restricting list, and the list must still carry the
+ * logon SID and `Everyone` — and **withdraws** the restricting-list rule the plugin
+ * announced in `0.20.0`, whose own reporter retracted it before the publish. It is
+ * bounded by the console as a *conjunction* (either recovers alone) and by the build
+ * axis left open. The same report isolates
  * producer 2 one input narrower by varying only the image the runner is hosted by —
  * the packaged Electron binary against a real `node.exe` — and names the line where
  * that image is chosen: `[process.execPath, runner.js]`, whose docstring and test

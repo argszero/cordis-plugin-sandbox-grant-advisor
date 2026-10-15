@@ -252,6 +252,33 @@ test('the shipped bundle patch describes the family the advice module covers, an
   assert.ok(/no ACL AT ALL/i.test(patch), 'the bundle patch does not say the lock candidate needs no ACL work, which is why it is ordered first')
 })
 
+test('the two published copies carry the withdrawn rule and the statement that replaced it', () => {
+  // 0.24.0 withdraws the restricting-list rule the plugin announced in 0.20.0, and
+  // the README and the bundle patch are where a mounting operator reads the family
+  // before any advisory fires. Both carried the rule and the one-part trustee
+  // reading beside it; a release that fixes the advisory's rendered text and leaves
+  // these two behind re-publishes the retracted conclusion, which is exactly the
+  // drift the patch's own drift guard was added for.
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  const patch = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
+  for (const [file, text] of [['README.md', readme], ['cordis.patch.yml', patch]]) {
+    assert.ok(/withdraw/i.test(text), `${file} does not say the restricting-list rule is withdrawn`)
+    assert.ok(/WITHDRAWS|withdraws/.test(text), `${file} keeps the retracted rule without naming the withdrawal`)
+    assert.ok(/enabled\s+group of the (?:restricted\s+)?token/i.test(text), `${file} does not carry part (a) of the conjunction`)
+    assert.ok(/also be carried in the restricting list/i.test(text), `${file} does not carry part (b) of the conjunction`)
+    assert.ok(/still carry the logon SID and/i.test(text), `${file} does not carry part (c) of the conjunction`)
+    assert.ok(/path-derived SID (?:can never be|is never) an enabled group/.test(text), `${file} does not keep the reason no setting repairs it`)
+  }
+  // The retracted rule is a claim about the LIST, and both copies still describe the
+  // list; what must not survive is the sentence, so it is asserted absent in each.
+  for (const [file, text] of [['README.md', readme], ['cordis.patch.yml', patch]]) {
+    assert.ok(
+      !/dies exactly when the list carries a SID that is not an enabled group/.test(text),
+      `${file} still states the retracted rule as a rule`,
+    )
+  }
+})
+
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {
   const paths = packedPaths()
   let checked = 0

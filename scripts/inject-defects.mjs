@@ -240,15 +240,41 @@ const MUTATIONS = [
   {
     // The finding #9626 measured, re-read as the story its deciding arm refutes.
     // That arm keeps the capability ACE in place and adds `Everyone` beside it to
-    // exit 0, so what fails is the absence of a trustee the restricted token holds
-    // — not the merged ACE. A text that says "an ACE with a synthetic name was
-    // merged" sends the reader to delete an ACE that every piped grandchild needs.
-    name: 'the default-DACL measurement is re-read as the merged ACE instead of the missing trustee',
+    // exit 0, so what fails is a property of the trustee — since 0.24.0 a
+    // conjunction of three — and not the merged ACE as such. A text that says an
+    // ACE with a synthetic name was merged sends the reader to delete an ACE that
+    // every piped grandchild needs.
+    name: 'the default-DACL measurement is re-read as the merged ACE instead of the trustee property',
     file: 'src/advice.ts',
     arms: 'native-init.spec.mjs',
     edits: [[
-      "    '     beside it also reaches exit 0. So what fails is not \"an ACE with a synthetic name was merged\" but the',",
-      "    '     beside it also reaches exit 0. So what fails is \"an ACE with a synthetic name was merged\", and not the',",
+      "    '     beside it also reaches exit 0. So what fails is not \"an ACE with a synthetic name was merged\", and it',",
+      "    '     beside it also reaches exit 0. So what fails IS \"an ACE with a synthetic name was merged\", and not the',",
+    ]],
+  },
+  {
+    // 0.24.0's whole addition: the rule its own reporter retracted is withdrawn,
+    // and the conjunction that replaced it is the measured statement. A text that
+    // keeps asserting the rule sends the reader to the list composition the arm
+    // set falsifies.
+    name: 'the withdrawn rule is asserted as still standing',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [[
+      "    '     Since 0.20.0 there was a RULE for which input does it, and 0.24.0 WITHDRAWS it: it was derived from',",
+      "    '     Since 0.20.0 there is a RULE for which input does it, and 0.24.0 states it again: it was derived from',",
+    ]],
+  },
+  {
+    // The conjunction is the correction itself, and each part is what an arm
+    // violates alone. A text that states two of the three parts licenses the
+    // sentence the third part's arm falsifies.
+    name: 'the conjunction loses the part the restricting list carries',
+    file: 'src/advice.ts',
+    arms: 'native-init.spec.mjs',
+    edits: [[
+      "    '     (b) that SID must ALSO be carried in the restricting list — `S-1-5-4` and `S-1-5-11` are enabled',",
+      "    '     (b) the restricting list is a second candidate — `S-1-5-4` and `S-1-5-11` are enabled',",
     ]],
   },
   {
@@ -279,31 +305,33 @@ const MUTATIONS = [
     edits: [["export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467 / #9626 / #8721'", "export const NATIVE_INIT_DISCUSSIONS = '#7876 / #7877 / #8193 / #8208 / #8313 / #8336 / #8334 / #8990 / #8991 / #9186 / #9238 / #9336 / #9463 / #9467'"]],
   },
   {
-    // 0.20.0's whole addition: #9467 turned the third producer's input from one
-    // measurement into a rule. Dropping the count leaves the sentence reading as an
-    // assertion about Windows instead of the result of sixteen arms.
-    name: 'the rule is asserted without the measurement that made it one',
+    // 0.20.0's addition, withdrawn in 0.24.0. The count was what made the sentence
+    // a measurement rather than an assertion; the withdrawal is what makes it
+    // honest once the comment that produced it is gone. A text that drops the
+    // withdrawal while keeping the arms reads as a rule that is still standing.
+    name: 'the withdrawal is dropped, so the retracted count reads as a live measurement',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    '     restricting list inside one host, and it holds 16 of 16 arms: the child dies exactly when the list',", "    '     restricting list inside one host: the child dies when the list',"]],
+    edits: [["    '     Since 0.20.0 there was a RULE for which input does it, and 0.24.0 WITHDRAWS it: it was derived from',\n    '     changing only the third entry of the restricting list inside one host, it claimed 16 of 16 arms, and',", "    '     Since 0.20.0 there is a RULE for which input does it, measured by changing the third entry of the',\n    '     restricting list inside one host, and it holds 16 of 16 arms, and',"]],
   },
   {
-    // The consequence the rule licenses — that no setting repairs it — rests on the
-    // write SIDs being derived from a path. Weakened to a tunable setting, the text
-    // sends the reader back to the policy knobs #9467 had already held fixed.
+    // The consequence that survives on its own footing — that no setting repairs
+    // it — rests on the write SIDs being derived from a path. Weakened to a
+    // tunable setting, the text sends the reader back to the policy knobs the
+    // withdrawn wave had already held fixed.
     name: 'the path-derived write SID is described as a tunable setting',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    '     `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any token — so the token that may',", "    '     `S-1-4-x-y-1`), and a path-derived SID can be added to the token own groups when the settings allow — so the token that may',"]],
+    edits: [["    '     (`S-1-4-x-y`, the temp one `S-1-4-x-y-1`), and a path-derived SID is never an enabled group of any',", "    '     (`S-1-4-x-y`, the temp one `S-1-4-x-y-1`), and a path-derived SID can join the token own groups when the settings allow of any',"]],
   },
   {
-    // The one self-rescue the report closed: adding the capability SID to the
-    // token's groups is refused (Win32 error 87). Omitting that refusal hands the
-    // reader a way out the operating system does not have.
-    name: 'the refused self-rescue is turned into a way out',
+    // The self-rescue refusal came from the comment 0.24.0 stopped citing, and the
+    // arm that recovers is a backend change rather than a token edit. Printing the
+    // retracted refusal again hands the reader a way out whose source is gone.
+    name: 'the retracted self-rescue refusal is printed again as if it were still sourced',
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
-    edits: [["    '     REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. #9467 measured all of this on',", "    '     available: `SetTokenInformation(TokenGroups)` takes the capability SID. #9467 measured all of this on',"]],
+    edits: [["    '     in that call. That is a backend change and not a knob a user has; the metric below is unchanged.',", "    '     in that call. Adding the capability SID to the token\\'s own groups is REFUSED: `SetTokenInformation(TokenGroups)` fails with Win32 error 87. That is a backend change and not a knob a user has.',"]],
   },
   {
     // #9471 is scope, not a member: a child that STARTS and then fails to load a

@@ -822,36 +822,41 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.match(flat, /A separating switch therefore confirms the sandbox and/)
   assert.match(flat, /this producer is the answer only when the runner DID own a/)
   // The second input, promoted from candidate to measurement by #9626, and the
-  // trustee rule the deciding arm licenses rather than the ACE story it refutes:
-  // the default DACL names a synthetic SID only under `workspace-write`, and what
-  // fails is the absence of a SID the token itself holds.
+  // three-part conjunction the reporter measured next (0.24.0) in place of the
+  // one-part trustee reading it retracts: the default DACL names a synthetic SID
+  // only under `workspace-write`, and what fails is a conjunction of three parts.
   assert.match(flat, /A second input sits on the SAME token and is NOT the restricting list/)
   assert.match(flat, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
   assert.match(flat, /was carried here as a candidate until #9626 measured it/)
   assert.match(flat, /rewrote ONLY the SID that one call names/)
-  assert.match(flat, /not "an ACE with a synthetic name was merged" but the absence of a trustee the restricted token itself holds/)
+  assert.match(flat, /not "an ACE with a synthetic name was merged", and it is not a single property either/)
+  assert.match(flat, /the statement is a CONJUNCTION OF THREE/)
+  assert.match(flat, /must be an ENABLED group of the restricted token/)
+  assert.match(flat, /that SID must ALSO be carried in the restricting list/)
+  assert.match(flat, /list must STILL carry the logon SID and `Everyone`/)
+  assert.match(flat, /is necessary and NOT sufficient/)
   // And the cost of the switch, which the backend's README states.
   assert.match(flat, /A `read-only` session is NOT a substitute/)
   assert.match(flat, /ConstrainedLanguage/)
   assert.match(flat, /Pure-native programs die here identically/)
   assert.match(flat, /retired by that control arm/)
-  // 0.20.0: the third producer's input stopped being one measurement and became a
-  // rule — the child dies exactly when the restricting list carries a SID that is
-  // not an enabled group of the token — and that is what turns it from a knob into
-  // a structure: the write SIDs are path-derived, so no setting repairs it, and the
-  // one self-rescue (adding the SID to the token's groups) is refused.
-  assert.match(flat, /Since 0\.20\.0 there is a RULE for which input does it/)
-  assert.match(flat, /it holds 16 of 16 arms/)
-  assert.match(flat, /carries a SID that is NOT an enabled group of the token being restricted/)
-  assert.match(flat, /are groups of the token and start it/)
-  assert.match(flat, /are not, and kill it/)
+  // 0.24.0: the third producer's rule is withdrawn — its own reporter retracted it
+  // before the publish, and the comment that derived it is gone — and what replaces
+  // it is the trustee of the merged ACE. The rows that falsify the old sentence are
+  // asserted, and the retracted figures must not be printed bare.
+  assert.match(flat, /Since 0\.20\.0 there was a RULE for which input does it, and 0\.24\.0 WITHDRAWS it/)
+  assert.match(flat, /its own reporter retracted it in that thread before this advisory published it/)
+  assert.match(flat, /List membership is therefore neither sufficient nor necessary/)
   assert.match(flat, /the write SIDs are DERIVED FROM A PATH/)
-  assert.match(flat, /a path-derived SID is never an enabled group of any token/)
-  assert.match(flat, /the token that may\s+write is the token that cannot start the child/)
-  assert.match(flat, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
+  assert.match(flat, /a path-derived SID is never an enabled group of any/)
+  assert.match(flat, /a trustee that fails part \(a\) whenever a temp/)
+  assert.match(flat, /naming an enabled group in that call/)
+  assert.doesNotMatch(flat, /it holds 16 of 16 arms/)
+  assert.doesNotMatch(flat, /carries a SID that is NOT an enabled group of the token being restricted/)
+  assert.doesNotMatch(flat, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
   // The build number is named as not-the-variable, because this family had only
   // ever been measured on one Windows build before #9467.
-  assert.match(flat, /#9467 measured all of this on Windows 10 19044/)
+  assert.match(flat, /#9467 was filed on Windows 10 19044/)
   assert.match(flat, /the build number is not the variable here/)
   // And the scope boundary: a child that starts and then fails to load at runtime
   // carries a message of its own and is deliberately not claimed (#9471).

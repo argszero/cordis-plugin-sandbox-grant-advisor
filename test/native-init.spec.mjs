@@ -319,16 +319,16 @@ test('read-only is named as a diagnostic and not as a repair, with the language 
   assert.match(body, /WDAC\/AppLocker policy/)
 })
 
-test('the token default DACL is a MEASURED input, with the trustee rule the measurement licenses', async () => {
+test('the token default DACL is a MEASURED input, and the statement is a conjunction of three', async () => {
   // #9336's suspicion, which 0.18.0 carried as a candidate and 0.23.0 carries as a
   // measurement: besides the restricting list, the modes differ in the SID the
   // backend merges into the token's default DACL, which is synthetic only under
   // `workspace-write`. The measurement changed the trustee and not the ACE, and its
   // deciding arm names BOTH — the capability ACE still in place, `Everyone` added
-  // beside it, exit 0 — so what the advisory may claim is the absence of a trusteed
-  // SID and not the presence of a synthetic one. Every one of those facts is what
-  // keeps the text from re-inflating into "the ACE is the cause", which is the
-  // reading the shipped ACE proves wrong.
+  // beside it, exit 0. The one-part reading that licensed ("the absence of a trustee
+  // the restricted token itself holds") is retracted by the reporter in 0.24.0: the
+  // same reporter measured three parts, each with an arm violating it alone, and the
+  // text has to carry all of them rather than the property that merely correlates.
   const { ctx } = await deathWorld()
   const body = contexts(await call(ctx, 'pwsh', { command: 'cmd /c echo x' }))[0]
     .content.map(block => block.text).join('\n')
@@ -342,14 +342,32 @@ test('the token default DACL is a MEASURED input, with the trustee rule the meas
   // arm rules out.
   assert.match(body, /rewrote ONLY the SID that one call names/)
   assert.match(body, /with `Everyone` added\s+beside it also reaches exit 0/)
-  assert.match(body, /not "an ACE with a synthetic name was merged" but the\s+absence of a trustee the restricted token itself holds/)
-  // The three arms that bound the rule rather than support it: the restricting list
-  // is not the input here, the console is a conjunction, and the build stays open.
+  assert.match(body, /not "an ACE with a synthetic name was merged", and it\s+is not a single property either/)
+  // The three parts, each with the arm that violates it alone — the arm sets are what
+  // makes this a conjunction rather than a longer guess, so the violating arms are
+  // asserted and not just the parts.
+  assert.match(body, /the statement is a CONJUNCTION OF THREE/)
+  assert.match(body, /an ENABLED group of the restricted token — `Administrators` is the counterexample, `0x10`/)
+  assert.match(body, /it dies even on the arm that carries it in the list/)
+  assert.match(body, /that SID must ALSO be carried in the restricting list/)
+  assert.match(body, /`S-1-5-4` and `S-1-5-11` are enabled\s+groups of this token and die when named alone/)
+  assert.match(body, /the same SID added to the list recovers/)
+  assert.match(body, /list must STILL carry the logon SID and `Everyone`/)
+  assert.match(body, /three removal arms die, one of them with a named\s+trustee that is enabled AND in the list/)
+  assert.match(body, /is necessary and NOT sufficient/)
+  assert.match(body, /`Everyone` is not the only trustee measured recovering/)
+  // The argument the second part reopens, and the label the reporter puts on it:
+  // their correspondence is a reading, not a measurement, and the text says so.
+  assert.match(body, /Part \(b\) reopens the argument that used to set a write-restricted reading aside/)
+  assert.match(body, /offered as their reading rather than as a measurement/)
+  assert.match(body, /Nobody has traced\s+`AccessCheck` on this path/)
+  // The three arms that bound the statement rather than support it: the restricting
+  // list is not the input here, the console is a conjunction, and the build stays open.
   assert.match(body, /taking the write SIDs back OUT of the restricting list does not recover/)
-  assert.match(body, /\(no\s+console\) AND \(no universally-held trustee in the default DACL\)/)
-  assert.match(body, /either one alone recovers/)
+  assert.match(body, /\(no console\) AND \(a merged grant that misses one of those three\s+parts\)/)
+  assert.match(body, /a console, or a grant that holds all three, each recovers alone/)
   assert.match(body, /\(mode × host × build\)/)
-  assert.match(body, /NOT measured to be the same/)
+  assert.match(body, /NOT\s+measured to be the same/)
   // The ambient dump is what retires the "merge replaced the ambient half" reading,
   // and the deletion warning survives it — with the reason the working arm kept the
   // ACE, so the next reader does not try the experiment anyway.
@@ -388,30 +406,35 @@ test('the desktop-host producer gains a narrower isolation and the line that dec
   assert.doesNotMatch(body, /This process IS an Electron binary/)
 })
 
-test('the third producer carries a RULE, not one measurement (0.20.0)', async () => {
-  // #9467 measured the input instead of describing a symptom: varying only the
-  // third entry of the restricting list inside one host, the child died exactly
-  // when that entry was not an enabled group of the token — 16 of 16 arms. That
-  // is what lets the advisory stop at "this producer applies here, and no setting
-  // repairs it" instead of handing over a comparison and hoping. The rule, the
-  // reason it is structural, and the refused self-rescue are all facts the reader
-  // can act on, so all three have to survive into the rendered body.
+test('the third producer\'s rule is withdrawn, and the rows that falsify it are the surviving part (0.24.0)', async () => {
+  // 0.20.0 shipped a rule here — "the child dies exactly when the restricting list
+  // carries a SID that is not an enabled group of the token", 16 of 16 arms — and
+  // 0.24.0 withdraws it: #9467's reporter retracted that conclusion in the same
+  // thread before the publish, and the comment that derived it is gone. The test
+  // therefore asserts the three things the reader needs in its place: the
+  // withdrawal with the reason it is not re-readable, the two rows that falsify the
+  // sentence (list membership is neither sufficient nor necessary), and the one
+  // consequence that survives on its own footing — a path-derived SID can never be
+  // an enabled group, so the shipped call names a trustee that fails part (a).
+  // The refused self-rescue and the 87 error went with the withdrawn comment and
+  // must NOT be printed as if they were still sourced.
   const { ctx } = await deathWorld()
   const body = contexts(await call(ctx, 'pwsh', { command: 'echo x' }))[0]
     .content.map(block => block.text).join('\n')
-  assert.match(body, /Since 0\.20\.0 there is a RULE/)
-  assert.match(body, /16 of 16 arms/)
-  assert.match(body, /NOT an enabled group of the token being restricted/)
-  assert.match(body, /DERIVED FROM A PATH/)
-  assert.match(body, /never an enabled group of any token/)
-  assert.match(body, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
-  assert.match(body, /#9467 measured all of this on\s+Windows 10 19044/)
-  // The claim the rule licenses — "no setting repairs it" — is what the reader is
-  // supposed to do with it, so it is asserted rather than left to the wording of
-  // one sentence: an advisory that measures the input and still implies a policy
-  // fix would be sending the reader to try settings again.
-  assert.match(body, /cannot be tuned away/)
-  assert.match(body, /which carries no such SID, starts it\s+and simply does not write/)
+  assert.match(body, /Since 0\.20\.0 there was a RULE for which input does it, and 0\.24\.0 WITHDRAWS it/)
+  assert.match(body, /its own reporter retracted it in that thread before this advisory published it/)
+  assert.match(body, /the comment that\s+carried it is no longer there to re-read/)
+  assert.match(body, /`read-only` puts the synthetic non-group SID INSIDE the list and the child starts/)
+  assert.match(body, /`workspace-write` keeps the capability SID inside the list and names it in the merged ACE and\s+the child dies/)
+  assert.match(body, /List membership is therefore neither sufficient nor necessary/)
+  assert.match(body, /the write SIDs are DERIVED FROM A PATH/)
+  assert.match(body, /never an enabled group of any/)
+  assert.match(body, /recovering means naming an enabled group\s+in that call/)
+  assert.match(body, /That is a backend change and not a knob a user has/)
+  assert.match(body, /#9467 was filed on Windows 10 19044/)
+  // The retracted figures and the retracted source: neither may be printed bare.
+  assert.doesNotMatch(body, /the child dies exactly when the list\s+carries a SID that is NOT an enabled group/)
+  assert.doesNotMatch(body, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
 })
 
 test('the runtime-load shape is named as scope and never claimed as this family (#9471)', async () => {

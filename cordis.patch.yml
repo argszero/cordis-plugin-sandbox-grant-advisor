@@ -147,17 +147,26 @@
 # varies only the runner's console topology; and the restricted token's own
 # restricting list, where a single capability SID — added only under
 # `workspace-write`, so the same command starts fine under `read-only` — kills
-# every program, `whoami.exe` and `cmd.exe` included), and since 0.20.0 states the
-# RULE behind that last producer rather than one measurement of it: varying only
-# the third entry of the restricting list inside one host, the child dies exactly
+# every program, `whoami.exe` and `cmd.exe` included), and since 0.24.0 WITHDRAWS
+# the RULE it stated about that last producer from 0.20.0: varying only the third
+# entry of the restricting list inside one host, the child was said to die exactly
 # when that entry is not an enabled group of the token being restricted (16 of 16
 # arms, #9467, measured on Windows 10 19044 rather than the 26200 the earlier
-# reports came from). That makes the producer structural rather than tunable — the
-# write SIDs are derived from a path (`S-1-4-x-y`, the temp one `S-1-4-x-y-1`), and
-# a path-derived SID can never be an enabled group of a token, so `workspace-write`
-# cannot both grant the write and start the child, while adding the capability SID
-# to the token's own groups is refused (`SetTokenInformation(TokenGroups)`, Win32
-# error 87) — so on such a machine no setting repairs it. Two reports filed in the
+# reports came from) — a conclusion its own reporter retracted in that thread
+# before the publish, and the comment that derived it is no longer there. Two rows
+# in the arm set falsify it: `read-only` with the synthetic non-group SID INSIDE
+# the list starts the child, and `workspace-write` with the capability SID inside
+# the list AND named by the merged ACE dies, so list membership is neither
+# sufficient nor necessary. What replaces it is the trustee of the ACE the
+# default-DACL call merges, in three parts — the SID it names must be an ENABLED
+# GROUP of the token (Administrators is `0x10`, deny-only, and dies even when the
+# list carries it); that SID must ALSO be carried in the restricting list; and the
+# list must STILL carry the logon SID and `Everyone`. One consequence survives on
+# its own footing: the write SIDs are derived from a path (`S-1-4-x-y`, the temp
+# one `S-1-4-x-y-1`), and a path-derived SID can never be an enabled group of a
+# token, so the shipped `workspace-write` call names a trustee that fails the first
+# part whenever a temp directory exists — which is why no setting repairs it, and
+# why recovering means naming an enabled group in that call. Two reports filed in the
 # same wave are named as SCOPE and not as members: #9463 is the same backend
 # stalling before any child is spawned (no approval event, no process), and #9471
 # is a child that starts and then fails to load a library at runtime, dying with
@@ -179,8 +188,16 @@
 # whose default DACL names a synthetic identity at all. The measurement rewrote the
 # trustee rather than the ACE — only the SID that one call names changed — and the
 # arm that names the capability SID AND `Everyone` together still recovers, so what
-# fails is the absence of a trustee the restricted token holds and not the presence
-# of a synthetic one. Two boundaries ride with it: the console is a CONJUNCTION with
+# fails is a property of the trustee and not the presence of a synthetic one. Three
+# parts must hold since 0.24.0, each with an arm that violates it alone: an ENABLED
+# group of the token (not `S-1-5-32-544`, deny-only at `0x10`), carried in the
+# restricting list as well (`S-1-5-4` and `S-1-5-11` die when named alone and the
+# same arm recovers once the SID joins the list), and a list that still carries the
+# logon SID and `Everyone` (three removal arms die, one of them naming a trustee
+# that is enabled AND in the list). The one-part reading this patch carried until
+# 0.24.0 — the absence of a trustee the token holds — is necessary and NOT
+# sufficient, and `Everyone` is not the only trustee measured recovering. Two
+# boundaries ride with it: the console is a CONJUNCTION with
 # it (either recovers alone), and the build axis is left open, because the
 # measurement is one build and the family has another (#8721, the same
 # packaged-desktop shape filed from Windows 11 26200, whose arms vary no
