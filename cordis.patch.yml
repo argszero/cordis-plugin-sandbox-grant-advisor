@@ -210,7 +210,17 @@
 # copied unedited with a provenance header naming the comment each came from; the
 # count of packages the materialiser copies is read out of that script's own
 # output, because the figure that circulated for it in the thread was written
-# without tallying the closure and was wrong.
+# without tallying the closure and was wrong; since 0.26.0 the hook is the twenty-arm
+# file its author posted, so the arms his later rows report can be run too. Three
+# corrections ride with that release: the logon entry in the ambient default-DACL
+# dump is `0xA0000000`, and only the Administrators and SYSTEM entries beside it are
+# `0x10000000`; the three-part statement above is credited to this plugin's issue #1
+# and to discussion #8497, because the thread whose number it used to carry is a
+# different producer's and holds none of its rows; and the refusal that once sat
+# beside the withdrawn rule is cited again, in the form its measurement supports — a
+# `SetTokenInformation(TokenGroups)` write-back refused with `87` whatever the buffer
+# holds, in both the unrestricted process and the read-only confinement, on one build,
+# with the reason not traced.
 # The same wave isolates the
 # desktop-host producer one input narrower — only the image hosting the runner
 # varied, the packaged Electron binary against a real node.exe (#9626) — and names

@@ -2,7 +2,7 @@
 // tools/hook.mjs — probes the two axes (restricting list vs default DACL) with one variable per arm.
 //
 // Author: Ethan-H1K, who offered these scripts in this repository's issue #1 and gave credit in the same thread.
-// Origin: https://github.com/argszero/cordis-plugin-sandbox-grant-advisor/issues/1#issuecomment-6172657585
+// Origin: https://github.com/argszero/cordis-plugin-sandbox-grant-advisor/issues/1#issuecomment-6196102774
 // The body underneath this block is unedited. tools/README.md says what each arm is for
 // and which number it reproduces; the count of packages the materialiser copies is printed
 // by that script itself rather than written down anywhere.
@@ -25,7 +25,19 @@ const WS_PTR = 'parseSid(workspaceWriteSid((() => { const i = process.argv.index
 
 const DACL_SYNTH = "setTokenDefaultDaclGrant(api, restrictedToken, " + PROBE_PTR + ");";
 const DACL_WS = "setTokenDefaultDaclGrant(api, restrictedToken, " + WS_PTR + ");";
+const CALL_SITE_SIDS = "[this.writeSidPtr, this.tempWriteSidPtr].filter((sid) => sid !== void 0)";
+const GUARD = "writeSids.length === 0 ? (() => {";
+const PARSE = (s) => "parseSid(\"" + s + "\")";
+const WW_LIST = "[\n\t\tlogonSid,\n\t\tknown.world,\n\t\t...writeSids\n\t]";
+const WW_NO_LOGON = "[\n\t\tknown.world,\n\t\t...writeSids\n\t]";
+const wwWith = (sid) => "[\n\t\tlogonSid,\n\t\tknown.world,\n\t\t" + PARSE(sid) + ",\n\t\t...writeSids\n\t]";
+const WW_NO_WORLD = "[\n\t\tlogonSid,\n\t\t...writeSids\n\t]";
 const RESTRICT_SYNTH = RESTRICT_ANCHOR.replace("[this.writeSidPtr, this.tempWriteSidPtr]", "[this.writeSidPtr, this.tempWriteSidPtr, " + PROBE_PTR + "]");
+
+function must(out, before) {
+  if (out === before) throw new Error("probe hook: anchor not found for variant " + variant);
+  return out;
+}
 
 function patch(src) {
   switch (variant) {
@@ -37,6 +49,18 @@ function patch(src) {
     case "rl-synth": return src.replace(RESTRICT_ANCHOR, RESTRICT_SYNTH);
     case "rl-synth-dacl-synth": return src.replace(RESTRICT_ANCHOR, RESTRICT_SYNTH).replace(DACL_ANCHOR, DACL_SYNTH);
     case "rl-synth-dacl-synth-everyone": return src.replace(RESTRICT_ANCHOR, RESTRICT_SYNTH).replace(DACL_ANCHOR, DACL_SYNTH + "\n\t\t\t" + EVERYONE);
+    case "nosids": return src.replace(CALL_SITE_SIDS, "[]").replace(GUARD, "false ? (() => {");
+    case "noli": return src.replace("restrictTokenIntegrity(api, restrictedToken, lowLabelSid);", "void lowLabelSid;");
+    case "dacl-interactive": return must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-4") + ");"), src);
+    case "dacl-authusers": return must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-11") + ");"), src);
+    case "dacl-admins": return must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-32-544") + ");"), src);
+    case "everyone-no-logon": return must(must(src.replace(DACL_ANCHOR, DACL_ANCHOR + "\n\t\t\t" + EVERYONE), src).replace(WW_LIST, WW_NO_LOGON), src);
+    case "everyone-no-world": return must(must(src.replace(DACL_ANCHOR, DACL_ANCHOR + "\n\t\t\t" + EVERYONE), src).replace(WW_LIST, WW_NO_WORLD), src);
+    case "rl-named-interactive": return must(must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-4") + ");"), src).replace(CALL_SITE_SIDS, "[this.writeSidPtr, this.tempWriteSidPtr, " + PARSE("S-1-5-4") + "]"), src);
+    case "rl-named-authusers": return must(must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-11") + ");"), src).replace(CALL_SITE_SIDS, "[this.writeSidPtr, this.tempWriteSidPtr, " + PARSE("S-1-5-11") + "]"), src);
+    case "rl-named-synth": return must(must(src.replace(DACL_ANCHOR, DACL_SYNTH), src).replace(CALL_SITE_SIDS, "[this.writeSidPtr, this.tempWriteSidPtr, " + PARSE("S-1-4-4242-4242") + "]"), src);
+    case "rl-named-interactive-no-world": return must(must(must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-4") + ");"), src).replace(CALL_SITE_SIDS, "[this.writeSidPtr, this.tempWriteSidPtr, " + PARSE("S-1-5-4") + "]"), src).replace(WW_LIST, WW_NO_WORLD), src);
+    case "rl-named-admins": return must(must(src.replace(DACL_ANCHOR, "setTokenDefaultDaclGrant(api, restrictedToken, " + PARSE("S-1-5-32-544") + ");"), src).replace(CALL_SITE_SIDS, "[this.writeSidPtr, this.tempWriteSidPtr, " + PARSE("S-1-5-32-544") + "]"), src);
     default: return src;
   }
 }

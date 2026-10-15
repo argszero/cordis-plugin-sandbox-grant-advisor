@@ -290,6 +290,35 @@ test('the two published copies carry the withdrawn rule and the statement that r
   }
 })
 
+test("the two published copies carry 0.26.0's corrections, not the text they replace", () => {
+  // The same reason as the test above, one release later: the README and the bundle
+  // patch are the two places a mounting operator reads the family before any advisory
+  // fires, so a correction that lands in the rendered advice alone is re-published
+  // every release. Each assertion below is one correction — the logon entry's mask,
+  // the thread the measurement is credited to, and the SetTokenInformation citation
+  // that 0.24.0 stopped printing and 0.26.0 restores in its measured form.
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  const patch = readFileSync(join(ROOT, 'cordis.patch.yml'), 'utf8')
+  for (const [file, text] of [['README.md', readme], ['cordis.patch.yml', patch]]) {
+    assert.ok(text.includes('0xA0000000'), `${file} does not carry the logon entry's mask`)
+    assert.ok(
+      !/the logon SID at `0x10000000`/.test(text),
+      `${file} still gives the logon entry the two ambient trustees' mask`,
+    )
+    assert.ok(/#8497/.test(text), `${file} does not credit the thread the default-DACL candidate was filed in`)
+    assert.ok(/#9626/.test(text), `${file} drops #9626 entirely, which is still this family's producer-2 isolation`)
+    assert.ok(
+      !/reporter in \[`#9626`\]'s thread/.test(text),
+      `${file} still credits the three-part statement to a thread that carries none of its rows`,
+    )
+    // The two copies spell the call differently on purpose — the README quotes the
+    // probe's own invocation with its arguments, the patch names the information
+    // class — so the assertion is on the call rather than on one spelling of it.
+    assert.ok(/SetTokenInformation\(/.test(text), `${file} does not cite the measured refusal`)
+    assert.ok(/reason not traced/.test(text), `${file} cites the refusal without the scope it was measured with`)
+  }
+})
+
 test('every relative import inside the tarball resolves to a file the tarball contains', () => {
   const paths = packedPaths()
   let checked = 0

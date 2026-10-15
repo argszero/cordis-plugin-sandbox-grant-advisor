@@ -750,9 +750,14 @@ Three producers have been measured under a confining mode:
    what the sentence was reading was not the list's composition.
 
    **What replaced it is the trustee of the ACE the grant merges, and the statement
-   has three parts.** Measured by the reporter in [`#9626`]'s thread on Windows 10
-   19045, console-less packaged mediator, `workspace-write`, with arms that separate
-   the parts:
+   has three parts.** Measured by the reporter on Windows 10 19045, console-less
+   packaged mediator, `workspace-write`, with arms that separate the parts — in
+   [this repository's issue #1](https://github.com/argszero/cordis-plugin-sandbox-grant-advisor/issues/1#issuecomment-6191353481),
+   restated beside the arms themselves in [`#8497`], the thread the default-DACL
+   candidate was filed in, whose 1 October A/B table and three-mediator console matrix
+   are the rows the statement is built on. It is **not** [`#9626`]: that thread is the
+   other producer's — the packaged Electron image that mints the token — and neither
+   its body nor any of its four comments carries these rows.
 
    - the SID the merged ACE names must be an **enabled group of the restricted
      token** — `S-1-5-32-544` (Administrators) is `0x10`,
@@ -776,9 +781,18 @@ Three producers have been measured under a confining mode:
    names a trustee that fails the **first** part whenever a temp directory exists. That
    is what the baseline row sees, and it is why no setting repairs it: recovering means
    naming an enabled group in that call, which is a change to the backend rather than a
-   knob a user has. (The `SetTokenInformation(TokenGroups)` refusal beside the rule
-   came from the withdrawn comment and is no longer re-readable, so the advisory no
-   longer cites it.)
+   knob a user has. The refusal that once sat *beside* the rule — that the capability
+   SID cannot be added to the token's own groups — went out with the rule it came from,
+   and **`0.26.0` brings it back measured**, in the narrower form the measurement
+   supports: a probe holding `TOKEN_QUERY | TOKEN_ADJUST_GROUPS` on its own token,
+   reading `TokenGroups` (14 entries) and calling
+   `SetTokenInformation(hToken, TokenGroups /* 2 */, buffer, size)`, is refused with
+   `GetLastError()` `87` (`ERROR_INVALID_PARAMETER`) for a byte-identical write-back,
+   for `S-1-5-32-544` with the `0x4` bit set, and for `S-1-5-4` appended — the same
+   three results in the unrestricted process and inside the `read-only` confinement.
+   A refusal that a byte-identical write-back also meets is not a statement about the
+   capability SID; what the advisory carries is the narrow fact with its scope
+   attached — `87`, content-independent, Windows 10 19045, reason not traced.
 
    The build number is not the variable here: this family had only ever been
    measured on Windows 11 26200, and [`#9467`] reproduced the whole structure on
@@ -872,10 +886,14 @@ Three producers have been measured under a confining mode:
    The same measurement dumps
    `GetTokenInformation(TokenDefaultDacl)` from inside the confined child and finds
    four entries — `Everyone` at full access, merged by the backend, beside
-   Administrators, SYSTEM and the logon SID at `0x10000000`, all three ambient and
-   identical to the unrestricted process's — so the merge **extends** this default
-   DACL; the "merge dropped the ambient half" reading does not apply on that
-   machine. The merge stays load-bearing in a way that forbids the obvious
+   Administrators and SYSTEM at `0x10000000` and the logon entry at `0xA0000000`, all
+   three ambient and identical to the unrestricted process's — so the merge
+   **extends** this default DACL; the "merge dropped the ambient half" reading does
+   not apply on that machine. The mask belongs to the entry rather than to the set:
+   the logon entry is the one whose mask differs from the other two, and its leaf
+   differs between sessions as well (`S-1-5-5-0-347451408` in the 1 October dump,
+   `S-1-5-5-0-385059572` on 15 October), so a reader comparing two dumps should
+   expect the second difference and not read it as a different entry. The merge stays load-bearing in a way that forbids the obvious
    experiment, and the working arm is the one that respects it: every new object
    the confined process creates takes its DACL from there, so an ACE *removed* to
    test the theory takes every piped grandchild spawn down with it (`spawn
@@ -1859,5 +1877,6 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#9463]: https://github.com/deepseek-ai/deepseek-harness/discussions/9463
 [#9471]: https://github.com/deepseek-ai/deepseek-harness/discussions/9471
 [#7846]: https://github.com/deepseek-ai/deepseek-harness/discussions/7846
+[#8497]: https://github.com/deepseek-ai/deepseek-harness/discussions/8497
 [#9626]: https://github.com/deepseek-ai/deepseek-harness/discussions/9626
 [#8721]: https://github.com/deepseek-ai/deepseek-harness/discussions/8721

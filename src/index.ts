@@ -68,7 +68,8 @@
  * DACL** is named as the second candidate the report raised, with the asymmetry that
  * makes it one (`workspace-write` is the only mode whose default DACL names a
  * synthetic SID) and the reason it must not be deleted to test it. `0.23.0` promotes
- * that candidate: `#9626` measured it by rewriting only the SID the merge names, and
+ * that candidate: `#8497` filed it and this repository's issue #1 measured it by rewriting
+ * only the SID the merge names, and
  * the arm that names the capability SID AND `Everyone` together recovers — so the
  * input is a property of the merged ACE's trustee rather than the presence of a
  * synthetic one. `0.24.0` then narrows that to what the same reporter measured next,

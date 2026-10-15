@@ -821,13 +821,17 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.match(flat, /Step 2: establish whether the runner OWNS A/)
   assert.match(flat, /A separating switch therefore confirms the sandbox and/)
   assert.match(flat, /this producer is the answer only when the runner DID own a/)
-  // The second input, promoted from candidate to measurement by #9626, and the
-  // three-part conjunction the reporter measured next (0.24.0) in place of the
-  // one-part trustee reading it retracts: the default DACL names a synthetic SID
-  // only under `workspace-write`, and what fails is a conjunction of three parts.
+  // The second input was FILED as a candidate in discussion #8497 and MEASURED in
+  // this repository's own issue #1 — not in #9626, which is the desktop-host
+  // producer's isolation and carries none of these rows. #9626 stays a family member
+  // for its own producer (asserted above), so only the credit is guarded here: a
+  // text that hands the measurement to the wrong thread sends a reader to a comment
+  // that does not contain it. The three-part conjunction the reporter measured next
+  // (0.24.0) replaces the one-part trustee reading it retracts.
   assert.match(flat, /A second input sits on the SAME token and is NOT the restricting list/)
   assert.match(flat, /`setTokenDefaultDaclGrant` merges one full-access ACE/)
-  assert.match(flat, /was carried here as a candidate until #9626 measured it/)
+  assert.match(flat, /was filed as a candidate in discussion #8497 and measured here, in this repository's issue #1/)
+  assert.doesNotMatch(flat, /until #9626 measured it/)
   assert.match(flat, /rewrote ONLY the SID that one call names/)
   assert.match(flat, /not "an ACE with a synthetic name was merged", and it is not a single property either/)
   assert.match(flat, /the statement is a CONJUNCTION OF THREE/)
@@ -854,6 +858,10 @@ test('the native-init advisory names the class, all three producers, and their c
   assert.doesNotMatch(flat, /it holds 16 of 16 arms/)
   assert.doesNotMatch(flat, /carries a SID that is NOT an enabled group of the token being restricted/)
   assert.doesNotMatch(flat, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
+  // The refusal itself is not printed bare either — since 0.26.0 it is cited with the
+  // scope the measurement has, and the scope is what keeps it from reading as a
+  // statement about the capability SID.
+  assert.match(flat, /refused with `87`, content-independent, on Windows 10 19045, reason\s+not traced/)
   // The build number is named as not-the-variable, because this family had only
   // ever been measured on one Windows build before #9467.
   assert.match(flat, /#9467 was filed on Windows 10 19044/)

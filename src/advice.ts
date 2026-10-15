@@ -442,8 +442,8 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * withdrawn — its reporter retracted it in `#9467` before the publish, and the
  * comment that derived it is no longer there.
  * `0.25.0` moves the instruments those arms were run with into the repository's
- * `tools/` — the module-loading hook over the shipped runner, the default-DACL and
- * token-group dumps, the bootstrap that can allocate a console first, and the
+ * `tools/` — the module-loading hook over the shipped runner, the default-DACL
+ * dump, the bootstrap that can allocate a console first, and the
  * materialiser that lets a plain `node.exe` host the runner — and points the
  * advisory at them instead of at a comment inside a thread, so an arm can be
  * re-run by a reader who was not in the conversation. The scripts are their
@@ -452,6 +452,23 @@ export const PTY_DISCUSSIONS = '#7638 / #8322 / #9170'
  * reproduces; the count of packages the materialiser copies is read out of that
  * script's own output rather than written down, because the one figure that
  * circulated for it was written without tallying the closure.
+ * `0.26.0` carries three corrections the reporter of this issue supplied, each one a
+ * statement previously published in a form the measurements do not support. The ambient
+ * default-DACL dump's fourth entry carries `0xA0000000` rather than the `0x10000000`
+ * that the two trustees beside it carry — the mask belongs to the entry, and setting
+ * both masks beside "all three ambient" is how the logon entry came to be read as
+ * sharing theirs. The three-part statement is credited to this issue and to discussion
+ * `#8497`, where the default-DACL candidate was filed; the thread number it used to
+ * carry belongs to a different producer's isolation and holds none of its rows, so a
+ * reader sent there finds nothing the sentence rests on. And the
+ * `SetTokenInformation(TokenGroups)` refusal returns with the scope its measurement has
+ * — `87` whatever the buffer holds, in the unrestricted process and the `read-only`
+ * confinement alike, on one build, reason not traced — because a refusal that a
+ * byte-identical write-back also meets is not a statement about the capability SID,
+ * which is the reading the sentence it rode beside had given it. `tools/hook.mjs` is
+ * replaced in the same release: the file shipped in `0.25.0` switches on eight arms,
+ * while the version its author ran has twenty, so twelve arms his own later rows report
+ * had no file here that could run them.
  *
  * `#9626` is the fourth wave's second isolation of producer 2, and it is narrower
  * than the ones before it: the token recipe, the grants, the stdio shapes, the
@@ -1241,11 +1258,21 @@ function nativeInitAdvisory(
     '     token — so the shipped `workspace-write` call names a trustee that fails part (a) whenever a temp',
     '     directory exists, which is what the baseline row sees, and recovering means naming an enabled group',
     '     in that call. That is a backend change and not a knob a user has; the metric below is unchanged.',
+    '     The refusal that used to ride BESIDE the rule has since been measured again, and is cited in that',
+    '     narrower form: a probe holding `TOKEN_QUERY | TOKEN_ADJUST_GROUPS` on its own token, reading',
+    '     `TokenGroups` (14 entries) and calling `SetTokenInformation(hToken, TokenGroups /* 2 */, buffer,',
+    '     size)`, is refused with `GetLastError()` `87` (`ERROR_INVALID_PARAMETER`) for a byte-identical',
+    '     write-back, for `S-1-5-32-544` with the `0x4` bit set, and for `S-1-5-4` appended — the same three',
+    '     results in the unrestricted process and inside the read-only confinement. A refusal that a',
+    '     byte-identical write-back meets is not a statement about the capability SID, so what this carries is',
+    '     the narrow fact and its scope: refused with `87`, content-independent, on Windows 10 19045, reason',
+    '     not traced.',
     '     #9467 was filed on Windows 10 19044, so the build number is not the variable here.',
     '',
     '     A second input sits on the SAME token and is NOT the restricting list: the token\'s DEFAULT DACL. It',
-    '     was carried here as a candidate until #9626 measured it, and the measurement is quoted as ITS',
-    '     reporter\'s rather than as ours.',
+    '     was filed as a candidate in discussion #8497 and measured here, in this repository\'s issue #1, and the',
+    '     measurement is quoted as ITS reporter\'s rather than as ours. It is not #9626: that thread is the other',
+    '     producer\'s, the packaged image that mints the token, and it carries none of these rows.',
     '     `setTokenDefaultDaclGrant` merges one full-access ACE into that default DACL — `SetEntriesInAclW`,',
     '     GRANT_ACCESS, FILE_ALL_ACCESS, onto the EXISTING one, so it extends rather than replaces — because every',
     '     new object the confined process creates takes its DACL from there, and without a SID the confined token',
@@ -1281,9 +1308,11 @@ function nativeInitAdvisory(
     '     Two arms bound it: taking the write SIDs back OUT of the restricting list does not recover',
     '     either (a different input — this is not producer 3 measured twice), nor does dropping the integrity-level',
     '     lowering. And the dump of `TokenDefaultDacl` from inside the confined child shows four entries —',
-    '     `Everyone` at full access, merged by the backend, beside Administrators, SYSTEM and the logon SID at',
-    '     `0x10000000`, all three unused-by-the-merge and ambient, identical to the unrestricted process\'s — so',
-    '     the merge EXTENDS this default DACL; it did not replace an ambient half on that machine.',
+    '     `Everyone` at full access, merged by the backend, beside Administrators and SYSTEM at `0x10000000`',
+    '     and the logon entry at `0xA0000000`, all three unused-by-the-merge and ambient, identical to the',
+    '     unrestricted process\'s — so the merge EXTENDS this default DACL; it did not replace an ambient half',
+    '     on that machine. The mask belongs to the entry rather than to the set: the logon entry is the one',
+    '     whose mask differs from the other two, and its leaf differs between sessions as well.',
     '     The instruments that measurement used are in this repository rather than in the thread it was',
     '     reported in: `tools/` holds the module-loading hook over the shipped runner, the default-DACL dump,',
     '     the bootstrap that can allocate a console first, and the materialiser that lets a plain node.exe host',

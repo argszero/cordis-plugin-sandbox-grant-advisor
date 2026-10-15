@@ -372,7 +372,15 @@ test('the token default DACL is a MEASURED input, and the statement is a conjunc
   // and the deletion warning survives it — with the reason the working arm kept the
   // ACE, so the next reader does not try the experiment anyway.
   assert.match(body, /four entries/)
-  assert.match(body, /all three .*ambient.* identical to the unrestricted process's/s)
+  // The second half of the sentence wraps between "the" and "unrestricted", so the
+  // match is made on the words rather than on the line's own spacing.
+  assert.match(body, /all three .*ambient.*identical to the\s+unrestricted process's/s)
+  // The mask belongs to the entry rather than to the set of four: only the two ambient
+  // trustees are `0x10000000`, and the logon entry is `0xA0000000`. The reporter's
+  // earlier sentence set both masks beside "all three ambient", which is how the logon
+  // entry came to be read as sharing theirs, so both halves are asserted here.
+  assert.match(body, /Administrators and SYSTEM at `0x10000000`/)
+  assert.match(body, /the logon entry at `0xA0000000`/)
   assert.match(body, /the merge EXTENDS this default DACL/)
   assert.match(body, /load-bearing for every piped grandchild spawn/)
   assert.match(body, /adds a\s+trustee to it rather than taking one away/)
@@ -432,9 +440,14 @@ test('the third producer\'s rule is withdrawn, and the rows that falsify it are 
   assert.match(body, /recovering means naming an enabled group\s+in that call/)
   assert.match(body, /That is a backend change and not a knob a user has/)
   assert.match(body, /#9467 was filed on Windows 10 19044/)
-  // The retracted figures and the retracted source: neither may be printed bare.
+  // The retracted figures stay out and the retracted rule's own sentence stays out.
+  // The refusal that rode beside it is not dropped, though: it is cited again since
+  // 0.26.0 with the scope its measurement has, because a refusal met by a
+  // byte-identical write-back is not a statement about the capability SID.
   assert.doesNotMatch(body, /the child dies exactly when the list\s+carries a SID that is NOT an enabled group/)
   assert.doesNotMatch(body, /`SetTokenInformation\(TokenGroups\)` fails with Win32 error 87/)
+  assert.match(body, /is refused with `GetLastError\(\)` `87`/)
+  assert.match(body, /refused with `87`, content-independent, on Windows 10 19045, reason\s+not traced/)
 })
 
 test('the runtime-load shape is named as scope and never claimed as this family (#9471)', async () => {

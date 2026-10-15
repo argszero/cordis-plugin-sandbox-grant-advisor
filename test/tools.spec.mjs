@@ -4,14 +4,18 @@
  *
  * `tools/` is a published surface with no runtime behind it — nothing in `lib/`
  * imports it and no advisory executes it — which is exactly the shape that drifts.
- * Two defects had already been reported against the *description* of this
- * directory before it existed, both by the person who wrote the scripts:
+ * Three defects had been reported against the *description* of this directory, all
+ * by the person who wrote the scripts:
  *
  * - a closure size ("25 packages") that had been written without tallying the
- *   closure, and was wrong; and
+ *   closure, and was wrong;
  * - "each script's header repeats its own invocation", which is true of three of
  *   the six and false of the other three — the reporter's own correction named
- *   one, and the same test names the other two.
+ *   one, and the same test names the other two; and
+ * - the hook itself: the version posted in the thread switches on eight arms, while
+ *   the version its author ran has twenty, so twelve arms his own rows report had no
+ *   file here that could run them. `0.26.0` ships the twenty-arm file, which is why
+ *   the arm table is checked against the script rather than against the thread.
  *
  * So the tables here are checked against the artifacts rather than against
  * themselves: the file list, the arm list and the knob list are each read out of
