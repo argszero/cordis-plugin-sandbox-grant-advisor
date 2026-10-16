@@ -139,7 +139,16 @@ Two consequences follow from that one line:
    settles the gate with an isolation table on one machine and one unprivileged
    account: the label write succeeds with Full control *or with Take-ownership
    alone*, and fails with `ChangePermissions`, `ReadPermissions` or `Modify`
-   alone — so the gate is `WRITE_OWNER` and nothing else.
+   alone — so the gate is `WRITE_OWNER` and nothing else. **And "it works when I
+   elevate" is not evidence against that**, which is the answer `#9831`'s
+   reasoning needed: on a UAC-filtered Administrators token, elevation changes
+   **two** variables at once — it adds `SeSecurityPrivilege` *and* it turns the
+   deny-only `BUILTIN\Administrators` SID into an enabled group, whose inherited
+   `Administrators:(OI)(CI)(F)` entry (the usual shape under a drive root or a
+   temp root) carries `WRITE_OWNER`. One successful elevated run therefore
+   supports both readings, `whoami /priv` shows the privilege in the very run
+   whose conclusion is in question, and the experiment that separates them has to
+   run unelevated.
 3. **The remedy is the narrowest form of that right.** The advisory recommends
    `icacls <dir> /grant "<user>:(OI)(CI)(WO)"` — `WO` *is* `WRITE_OWNER`, i.e.
    literally the right the documented prerequisite names, so the one-liner grants
@@ -1455,18 +1464,42 @@ The lock file is opened with `OPEN_ALWAYS` and never deleted, so an absent or
 empty directory after a failure is itself the finding. Behind it come the
 documented prerequisite (missing `WRITE_OWNER`, and `WRITE_DAC` for a directory
 the caller does not own — a right on the **directory**, not `SeSecurityPrivilege`
-and not elevation) and the directory itself. The private `dsh-XXXXXX` directory is
+and not elevation, which [#9831] argued for from the label flag and which the
+advisory answers with the two variables elevation actually changes) and the
+directory itself. The private `dsh-XXXXXX` directory is
 created *before* the grant, so a failed call leaves it behind — which is the trace
 to search for, and the reason a redirect that reached only one of the two temp
 roots (`os.tmpdir()` chooses the private directory, `GetTempPathW()` chooses
 `dsh-acl-locks`) can look like it did nothing.
 
-**It ships no repair command**, for the reason the standing-grant section ships
-none: the line names no directory, and a grant aimed at the wrong one is worse
-than none. What it hands over is the listing that names the directory, and then
-the backend's own `diagnose-windows-sandbox-acl` skill — with the version boundary
-that the skill arrives with the `0.2.0` line, so a `0.1.7` install should not go
-looking for it. It also names the two repairs [#9460] measured as **not** working,
+**It ships no grant aimed at the failed directory**, for the reason the
+standing-grant section ships none: the line names no directory, and a grant aimed
+at the wrong one is worse than none. What it hands over is the listing that names
+the directory, and then the backend's own `diagnose-windows-sandbox-acl` skill —
+with the version boundary that the skill arrives with the `0.2.0` line, so a
+`0.1.7` install should not go looking for it.
+
+**One grant it does hand over, aimed at the only object it can name without that
+line** (added in 0.27.0, from [#9831]). The private `dsh-XXXXXX` directory the
+probe finds is created per live session/workspace pair, so repairing *it* repairs
+one session and the next one fails identically. The fix belongs on the parent —
+the root `os.tmpdir()` resolves to — and it has to be **inheritable**, because
+the directory it must reach does not exist yet:
+
+```
+icacls "<the root os.tmpdir() resolves to>" /grant "%USERNAME%:(OI)(CI)(WO)"
+```
+
+That is handed over as the *experiment* that separates candidate 2 from candidates
+1 and 3, not as a repair, and it states both of its outcomes: if the next private
+directory provisions, the privilege reading [#9831] argues is refuted; if the same
+sentence returns, the documented prerequisite is incomplete, which is an upstream
+finding to file rather than a reason to run the grant again. It also names the trap
+in the tool it otherwise recommends — right for the path a probe names, wrong for
+this one: the repair skill's ACE comes from the three-argument
+`FileSystemAccessRule(SID, FullControl, Allow)` constructor, which .NET defines
+with `InheritanceFlags.None`, so the skill aimed at the temp root repairs the temp
+root itself and leaves the next session's directory exactly where it was. It also names the two repairs [#9460] measured as **not** working,
 each with its reason: `takeown /A` moves ownership to Administrators, whose
 implicit rights are READ_CONTROL and WRITE_DAC and therefore not `WRITE_OWNER`;
 `icacls /reset /T /C` restores an inherited `Authenticated Users:(M)` entry that
@@ -1867,6 +1900,7 @@ the current runtime cannot distinguish rather than counting it as a pass.
 [#9336]: https://github.com/deepseek-ai/deepseek-harness/discussions/9336
 [#9272]: https://github.com/deepseek-ai/deepseek-harness/discussions/9272
 [#9460]: https://github.com/deepseek-ai/deepseek-harness/discussions/9460
+[#9831]: https://github.com/deepseek-ai/deepseek-harness/discussions/9831
 [#1157]: https://github.com/deepseek-ai/deepseek-harness/discussions/1157
 [#4163]: https://github.com/deepseek-ai/deepseek-harness/discussions/4163
 [#997]: https://github.com/deepseek-ai/deepseek-harness/discussions/997

@@ -844,8 +844,8 @@ const MUTATIONS = [
     file: 'src/advice.ts',
     arms: 'signature.spec.mjs',
     edits: [[
-      "    ...(failure.klass === 'apply-denied' ? writeOwnerEvidence() : []),",
-      '    ...writeOwnerEvidence(),',
+      "    ...(failure.klass === 'apply-denied' ? [...writeOwnerEvidence(), ...elevationIsTwoVariables()] : []),",
+      '    ...writeOwnerEvidence(),\n    ...elevationIsTwoVariables(),',
     ]],
   },
   {
@@ -1197,6 +1197,43 @@ const MUTATIONS = [
     file: 'src/advice.ts',
     arms: 'acl-aggregate.spec.mjs',
     edits: [["  const layer = failure.layer === 'temp'", "  const layer = failure.layer === 'workspace'"]],
+  },
+  {
+    // The evidence #9831 offers is "it works when I elevate". Dropping the second
+    // variable leaves the privilege as the only explanation of that run, which is
+    // the reading this section exists to refuse — and the one a reader who has
+    // already elevated is most likely to accept.
+    name: 'elevation is presented as one variable, so a successful elevated run confirms the privilege',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '  Elevation adds `SeSecurityPrivilege` AND turns the `BUILTIN\\\\Administrators` SID from `Use for deny only`',\n    '  into an enabled group. A directory under a drive root, or under a temp root, normally carries an inherited',",
+      "    '  Elevation adds `SeSecurityPrivilege`, which is why the elevated run succeeds and an unelevated one',\n    '  does not. The directory itself needs no ACE of its own for that:',",
+    ]],
+  },
+  {
+    // The whole point of the section is that the recommended tool is right for the
+    // path a probe names and WRONG for the temp root. Presenting it as right for
+    // both sends the reader back to a fix that repairs one session.
+    name: 'the repair skill is presented as durable, so its explicit ACE reads as inheritable',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '  constructor, which .NET defines with `InheritanceFlags.None`, so the skill aimed at the temp root repairs',\n    '  the temp root itself and leaves the next session\\'s directory exactly where it was.',",
+      "    '  constructor, so the skill aimed at the temp root repairs it and every directory created under it',\n    '  afterwards — it is the tool to use for this instance too.',",
+    ]],
+  },
+  {
+    // The family's central rule: a grant is only shipped when its target can be
+    // NAMED. Aiming the one grant at the failed directory restores exactly the
+    // defect the rule exists to prevent, and the contract test is what holds it.
+    name: 'the one grant is aimed at the failed directory instead of the object the probe can name',
+    file: 'src/advice.ts',
+    arms: 'acl-aggregate.spec.mjs',
+    edits: [[
+      "    '    PowerShell: icacls \"<the root os.tmpdir() resolves to>\" /grant \"$env:USERNAME:(OI)(CI)(WO)\"',",
+      "    '    PowerShell: icacls \"<the private directory from the listing>\" /grant \"$env:USERNAME:(OI)(CI)(WO)\"',",
+    ]],
   },
   {
     // The pair is what makes the condition permanent: a retry cannot clear

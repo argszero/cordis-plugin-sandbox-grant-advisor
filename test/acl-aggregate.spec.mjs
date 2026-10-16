@@ -23,10 +23,13 @@
  *    line names the API, the code and usually the directory, which is exactly
  *    what this family's reason for existing is the absence of — so the
  *    classifier refuses it and the ACL diagnosis is what speaks.
- * 4. **Nothing is handed to the shell.** The line names no directory, so the
- *    advisory ships no grant command; what it hands over is the listing that
- *    names the directory, in first position because it is the only candidate a
- *    directory listing can rule out and the only one that needs no ACL at all.
+ * 4. **Nothing is handed to the shell but one aimed grant.** The line names no
+ *    directory, so the advisory ships no grant aimed at the FAILED one; what it
+ *    hands over is the listing that names it, in first position because it is the
+ *    only candidate a directory listing can rule out and the only one that needs
+ *    no ACL at all. Since 0.27.0 it also hands over one grant — aimed at the only
+ *    object this family can name without that line, the temp root, where a fix
+ *    has to be INHERITABLE to outlive the session that needed it.
  */
 
 import { test } from 'node:test'
@@ -37,6 +40,7 @@ import {
   ACL_AGGREGATE_TEMP_SENTENCE,
   ACL_AGGREGATE_WORKSPACE_SENTENCE,
   classifyAclAggregateFailure,
+  classifyProvisioningFailure,
   failureLine,
 } from '../lib/signature.js'
 import { aggregateTool, call, contexts, failingTool, logLines, who, world } from './harness.mjs'
@@ -209,13 +213,28 @@ test('the two halves of the one backend are told apart in the text', () => {
   }
 })
 
-test('the advisory hands over a probe, never a grant it cannot aim', () => {
+test('no grant is aimed at the failed directory, and the one that is handed over names its target', () => {
   const text = advisoryText(classifyAclAggregateFailure(TEMP_SENTENCE), { tool: 'pwsh' })
-  // No repair command, and the reason is stated rather than left implicit.
-  assert.doesNotMatch(text, /icacls .*\/grant/)
-  assert.doesNotMatch(text, /icacls .*:\(OI\)\(CI\)/)
-  assert.match(text, /nothing in the line names the directory one would have to be aimed at/)
-  // What it hands over instead: the listing that names the directory, and the
+  // 0.27.0 narrowed this contract deliberately, so the two halves of it are stated
+  // separately. The rule was "no grant command at all", on the reason that a grant
+  // aimed at the wrong directory is worse than none — and that reason still holds
+  // for the FAILED directory, which this line never names. What changed is that the
+  // family gained one object it CAN name without the withheld line: the temp root,
+  // the parent every per-session directory is created under. Every grant in the
+  // text must therefore carry that placeholder rather than a bare path, which is
+  // what keeps the aiming auditable instead of guessed.
+  const grants = [...text.matchAll(/icacls .*\/grant[^\n]*/g)].map(match => match[0])
+  assert.equal(grants.length, 2, `the two spellings of the one grant, saw ${grants.length}`)
+  for (const line of grants) {
+    assert.match(line, /<the root os\.tmpdir\(\) resolves to>/, line)
+    // ...and it is the INHERITABLE form, because the directory it must reach does
+    // not exist yet when the grant is written.
+    assert.match(line, /:\(OI\)\(CI\)\(WO\)/, line)
+  }
+  assert.match(text, /it ships no grant aimed at the FAILED\s+directory/)
+  assert.match(text, /The one grant above is aimed at the temp root instead/)
+  assert.match(text, /the only object here that can be named without the withheld line/)
+  // What it hands over as the probe: the listing that names the directory, and the
   // backend's own repair skill.
   assert.match(text, /Get-ChildItem -Force "<root>" -Filter dsh-\*/)
   assert.match(text, /diagnose-windows-sandbox-acl/)
@@ -240,6 +259,61 @@ test('the advisory hands over a probe, never a grant it cannot aim', () => {
   const linked = advisoryText(classifyAclAggregateFailure(TEMP_SENTENCE), { href: 'https://example.invalid/d/9460' })
   assert.match(linked, /tracked upstream: https:\/\/example\.invalid\/d\/9460/)
   assert.doesNotMatch(linked, /tracked upstream \(discussion/)
+})
+
+test('elevation is presented as two variables, so a successful elevated run proves neither', () => {
+  // #9831 read the label flag correctly and concluded from it that the label needs
+  // `SeSecurityPrivilege`. The claim this section has to answer is the EVIDENCE the
+  // reporter offers — "it works elevated" — and the answer is that elevation moves
+  // a second variable too. Both halves are asserted, because the section is
+  // worthless if it only denies the privilege without naming what else elevation
+  // changed.
+  const text = advisoryText(classifyAclAggregateFailure(TEMP_SENTENCE), {})
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /IS ELEVATION THE ANSWER\? On a UAC-filtered Administrators token it changes TWO variables/)
+  assert.match(flat, /a single successful elevated run supports BOTH readings/)
+  assert.match(flat, /into an enabled group/)
+  assert.match(flat, /`Administrators:\(OI\)\(CI\)\(F\)` entry/)
+  // The read that CANNOT separate them is named as such, since it is the one the
+  // reporter reached for.
+  assert.match(flat, /`whoami \/priv` is not one of them/)
+  assert.match(flat, /it shows the privilege in the elevated run, which is the run whose conclusion is in question/)
+  // ...and the two reads that do, both unelevated.
+  assert.match(flat, /`whoami \/groups` shows whether/)
+  assert.match(flat, /`icacls "<the directory>"` shows whether an ACE naming your OWN account carries \(F\) or \(WO\)/)
+  // The section is SHARED, so the plain ACL family carries it too — where the
+  // advisory hands over an elevated command in its second branch and a reader would
+  // otherwise read success there as confirmation of the privilege.
+  const acl = advisoryText(classifyProvisioningFailure('SetNamedSecurityInfoW failed (Win32 5): grantWrite(D:\\ws)'))
+  assert.match(acl.replace(/\s+/g, ' '), /IS ELEVATION THE ANSWER\?/)
+})
+
+test('the durable instance is the parent, and the skill is named as the wrong tool for it', () => {
+  // #9831's own reading of its report is "the root works, every new directory
+  // fails" — so a fix aimed at the directory the probe found is a fix aimed at one
+  // session. This is the section that says so, and it is only useful if it also
+  // names the trap: the recommended skill's ACE is EXPLICIT, so the tool would
+  // reproduce exactly the failure it was meant to prevent.
+  const text = advisoryText(classifyAclAggregateFailure(TEMP_SENTENCE), {})
+  const flat = text.replace(/\s+/g, ' ')
+  assert.match(flat, /IF WHAT THE PROBE FOUND IS A PER-SESSION DIRECTORY, ITS PARENT IS THE DURABLE INSTANCE/)
+  assert.match(flat, /created per live session\/workspace pair, so it is a different object every session/)
+  assert.match(flat, /repairing it repairs this one and leaves the next one failing identically/)
+  assert.match(flat, /the root `os\.tmpdir\(\)` resolves to in the harness process/)
+  assert.match(flat, /only an INHERITABLE ACE there reaches a directory that does not exist yet/)
+  assert.match(flat, /`\(OI\)\(CI\)` is the whole of the difference/)
+  // The trap, on the shipped constructor rather than as advice about style.
+  assert.match(flat, /the three-argument `FileSystemAccessRule\(SID, FullControl, Allow\)`\s+constructor/)
+  assert.match(flat, /which \.NET defines with `InheritanceFlags\.None`/)
+  assert.match(flat, /the skill aimed at the temp root repairs the temp root itself/)
+  // Both outcomes of the experiment are stated, including the one that would be an
+  // upstream finding — so a reader who fails it does not read that as their error.
+  assert.match(flat, /Read the result as the experiment it is, and run it unelevated/)
+  assert.match(flat, /Under candidate 2 the next private\s+directory provisions and the privilege reading is refuted/)
+  assert.match(flat, /that is a finding about the documented prerequisite rather than a reason to run the/)
+  // Its own boundary: the lock of candidate 1 sits under the OTHER root.
+  assert.match(flat, /this settles the private capability, which is `os\.tmpdir\(\)`'s/)
+  assert.match(flat, /lives under the OTHER root, and that one is settled by the listing rather than by any grant/)
 })
 
 test('the refusal arrives as a notice beside the failing call, and its members never do', async () => {

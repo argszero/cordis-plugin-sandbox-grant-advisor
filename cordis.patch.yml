@@ -23,6 +23,11 @@
 #   - the missing right is WRITE_OWNER on the directory — an object right the
 #     caller can grant itself, not SeSecurityPrivilege and not elevation
 #     (the manifest half of the merged DACL+SACL write is what needs it);
+#   - and why "it works when I elevate" does not confirm the privilege: on a
+#     UAC-filtered Administrators token elevation ALSO enables the deny-only
+#     `Administrators` group, whose inherited `(F)` entry carries WRITE_OWNER —
+#     two variables move at once, and `whoami /priv` (which shows the privilege
+#     in the very run whose conclusion is in question) separates neither;
 #   - the directory's own ACL is the discriminator (`icacls <dir>`, looking for
 #     an ACE that names your SID with (F));
 #   - the remedy is one unelevated line, forked on ownership because one command
@@ -461,12 +466,21 @@
 # `SeSecurityPrivilege` and not elevation) and the directory itself (created
 # first, so about the ACE not applying rather than about creation — with the trap
 # that a failing removal may be a consequence of a grant that left the directory
-# open, not a second fault). It ships NO repair command, for the reason the
-# standing-grant section ships none: the line names no directory, and a grant
-# aimed at the wrong one is worse than none. What it hands over is the listing
-# that names the directory, and then the backend's own
+# open, not a second fault). It ships no grant aimed at the FAILED directory, for
+# the reason the standing-grant section ships none: the line names no directory,
+# and a grant aimed at the wrong one is worse than none. What it hands over is the
+# listing that names the directory, and then the backend's own
 # `diagnose-windows-sandbox-acl` skill — with the version boundary that the skill
-# arrives with the `0.2.0` line. It also discards the inference a reader makes
+# arrives with the `0.2.0` line. Since 0.27.0 it also hands over ONE grant, aimed
+# at the only object this family can name without that line: the temp root, the
+# parent every per-session `dsh-XXXXXX` directory is created under, where an
+# INHERITABLE ACE (`(OI)(CI)(WO)`) reaches a directory that does not exist yet —
+# and it names the trap in the tool it otherwise recommends, because the repair
+# skill builds its ACE with the three-argument
+# `FileSystemAccessRule(SID, FullControl, Allow)` constructor, which .NET defines
+# with `InheritanceFlags.None`, so the skill aimed at the temp root repairs the
+# temp root and leaves the next session's directory where it was. It also discards
+# the inference a reader makes
 # from the Config schema, because `#9460` made it: a visible `probeTimeoutMs`
 # suggests a capability probe classified by output signatures, but this backend's
 # Windows chain is a single rung selected without probing and its grant path

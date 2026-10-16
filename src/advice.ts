@@ -12,8 +12,12 @@
  *   The reported failures are `ERROR_ACCESS_DENIED` from a *merged* DACL + SACL
  *   write; the missing right is `WRITE_OWNER` on the directory — an object right
  *   the caller can grant itself with `icacls`, unelevated. It is **not**
- *   `SeSecurityPrivilege`, the token privilege the reports naturally reach for;
- *   `whoami /priv` cannot show the difference, and elevation is the wrong lever.
+ *   `SeSecurityPrivilege`, the token privilege the reports naturally reach for,
+ *   and the section 0.27.0 added says why an elevated run that works does not
+ *   confirm it: on a UAC-filtered Administrators token, elevation ALSO enables the
+ *   deny-only `Administrators` group, whose inherited `(F)` entry carries
+ *   `WRITE_OWNER` — two variables move at once, and `whoami /priv` shows neither
+ *   of them separately.
  *   The remedy is the **narrowest** form of that grant — `(WO)` alone, which is
  *   literally the right the backend's prerequisite names — with Full control
  *   offered as the broad alternative; and the advisory carries the **version
@@ -321,9 +325,16 @@
  *   order a probe can separate them, and puts the one that needs no ACL at all —
  *   the per-path lock both the grant and its cleanup take, whose file is created
  *   before any descriptor is read — first, because it is also the only candidate a
- *   directory listing can rule out. It ships **no repair command** on purpose: the
- *   ACL family can hand over a grant because its line names the directory, and
- *   nothing here does, so what is handed over is the probe that names it. This is
+ *   directory listing can rule out. It ships no grant aimed at the **failed**
+ *   directory, on purpose: the ACL family can hand over one because its line names
+ *   the directory, and nothing here does, so what is handed over is the probe that
+ *   names it. What 0.27.0 adds is the one object this family can name without that
+ *   line — the temp root, which is not the object that failed but the parent every
+ *   per-session object is created under, and where a fix has to be inheritable to
+ *   outlive the session that needed it. It says so together with the trap in the
+ *   tool it otherwise recommends: the repair skill's ACE is explicit
+ *   (`FileSystemAccessRule`'s three-argument constructor, `InheritanceFlags.None`),
+ *   so aiming the skill at the temp root repairs the temp root alone. This is
  *   also the family whose `layer` discriminator exists because the producer has
  *   two sentences and the difference is real — the workspace half keeps its
  *   standing ACE and frees only SIDs, the temp half revokes and removes.
@@ -885,6 +896,57 @@ function writeOwnerEvidence(): string[] {
 }
 
 /**
+ * Why "it worked when I elevated" does not confirm the privilege hypothesis.
+ *
+ * `#9831` read the label flag correctly — `labelEdit.kind === 'keep' ? 4 : 20` is
+ * real, and `20` is `DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION` —
+ * and then concluded from it that writing the label needs `SeSecurityPrivilege`.
+ * The conclusion is not available from that premise, and the reason is what this
+ * section exists to state: on a UAC-filtered Administrators token **elevation
+ * changes two variables at once**. It adds the privilege *and* it turns
+ * `BUILTIN\Administrators` from `Use for deny only` into an enabled group — and a
+ * directory under a drive root, or under a temp root, normally carries an
+ * inherited `Administrators:(OI)(CI)(F)` entry, which contributes nothing to the
+ * filtered token and Full control (whose mask carries `WRITE_OWNER`) to the
+ * elevated one. So one successful elevated run supports **both** readings, and
+ * the object-right reading explains it with no token privilege at all.
+ *
+ * It is a **shared** section rather than a paragraph of either family, because
+ * both make the same denial in different words — the ACL family's diagnosis says
+ * "a directory ACL fact, not a token privilege", and the aggregate family's
+ * second candidate says "a right on the DIRECTORY rather than
+ * `SeSecurityPrivilege` or elevation". A reader who has already elevated and
+ * succeeded has a real reason to doubt whichever one they read, and the two texts
+ * must answer it the same way or the weaker-sounding one loses by default.
+ *
+ * What it hands over is the separation rather than a verdict, and it names the
+ * read that cannot supply one: `whoami /priv` shows the privilege in the elevated
+ * run, which is the run whose conclusion is in question. The two variables are
+ * named separately by `whoami /groups` and an `icacls` listing, and the
+ * experiment that would actually decide has to run unelevated, because elevation
+ * *is* the variable under test.
+ * @returns the section's lines, ending with the blank separator line.
+ */
+function elevationIsTwoVariables(): string[] {
+  return [
+    'IS ELEVATION THE ANSWER? On a UAC-filtered Administrators token it changes TWO variables, which is why an',
+    'elevated run that works is not evidence for the privilege:',
+    '  Elevation adds `SeSecurityPrivilege` AND turns the `BUILTIN\\Administrators` SID from `Use for deny only`',
+    '  into an enabled group. A directory under a drive root, or under a temp root, normally carries an inherited',
+    '  `Administrators:(OI)(CI)(F)` entry — and that entry contributes nothing to the filtered token while giving',
+    '  Full control, whose mask carries WRITE_OWNER, to the elevated one. So a single successful elevated run',
+    '  supports BOTH readings, and the object-right reading explains it with no token privilege at all.',
+    '  Two reads name the two variables separately, and both can run unelevated: `whoami /groups` shows whether',
+    '  `BUILTIN\\Administrators` is deny-only for this token, and `icacls "<the directory>"` shows whether an ACE',
+    '  naming your OWN account carries (F) or (WO).',
+    '  `whoami /priv` is not one of them: it shows the privilege in the elevated run, which is the run whose',
+    '  conclusion is in question. A rerun does not settle it either, because elevation IS the variable under',
+    '  test — so the experiment that means anything here is an unelevated one.',
+    '',
+  ]
+}
+
+/**
  * What the grant leaves behind once it applies, and how far its label travels.
  *
  * The advisory hands the reader a command that makes the backend's workspace
@@ -1050,7 +1112,7 @@ function aclAdvisory(failure: ProvisioningFailure, href?: string): string {
     '(WO) / Write owner. If the strongest entry naming you is (M) / Modify — or no entry names you at all and',
     'your access comes from an inherited `Authenticated Users:(M)` — that is this failure.',
     '',
-    ...(failure.klass === 'apply-denied' ? writeOwnerEvidence() : []),
+    ...(failure.klass === 'apply-denied' ? [...writeOwnerEvidence(), ...elevationIsTwoVariables()] : []),
     'Ownership decides which of the two commands below can work, so read it first — PowerShell 5.1 or later:',
     `  (Get-Acl "${path}").Owner      # compare with: whoami`,
     'If that is not your own account, take the second branch: the first one is refused before it runs.',
@@ -2072,6 +2134,61 @@ function cimWmiAdvisory(failure: CimDenialFailure, mode: SandboxModeName, href?:
 }
 
 /**
+ * The durable instance of a fix that would otherwise repair one session only.
+ *
+ * `#9831` reports the TEMP half, and the probe this family already hands over
+ * ends at an object created per live session/workspace pair: a `dsh-XXXXXX`
+ * directory under the root `os.tmpdir()` resolves to, still on disk because its
+ * removal is the other half of the sentence that failed. Repairing *that*
+ * directory repairs this session — the next one creates a new directory, inherits
+ * nothing from the old one, and fails identically. The object that reaches every
+ * later directory is its **parent**, and only an INHERITABLE ACE there does it.
+ *
+ * Naming the parent costs the family's "nothing here names the directory" rule
+ * nothing, which is why this is a stated exception rather than a reversal of it.
+ * The rule's reason is that a grant aimed at the wrong directory is worse than
+ * none; the temp root is not a guess — it is the parent of the directory the
+ * plugin's own probe has just found, and the place the reader's `%TEMP%` points.
+ *
+ * It also names the trap in the tool this family otherwise recommends, because
+ * that tool is right for the path a probe names and wrong for this one: the
+ * repair skill builds its ACE with the **three-argument**
+ * `FileSystemAccessRule(SID, FullControl, Allow)` constructor, the one .NET
+ * defines with `InheritanceFlags.None`, so the skill aimed at the temp root
+ * repairs the temp root and leaves the next session's directory where it was.
+ *
+ * The grant is handed over as the experiment that separates candidate 2 from
+ * candidates 1 and 3 rather than as the repair, and both outcomes are stated —
+ * including the one that would be an upstream finding, which is what the public
+ * reply to `#9831` told its reporter.
+ * @returns the section's lines.
+ */
+function durableTempRootInstance(): string[] {
+  return [
+    'IF WHAT THE PROBE FOUND IS A PER-SESSION DIRECTORY, ITS PARENT IS THE DURABLE INSTANCE:',
+    '  The private `dsh-XXXXXX` directory is created per live session/workspace pair, so it is a different object',
+    '  every session — repairing it repairs this one and leaves the next one failing identically. The object that',
+    '  reaches the later ones is its parent, the root `os.tmpdir()` resolves to in the harness process, and only',
+    '  an INHERITABLE ACE there reaches a directory that does not exist yet:',
+    '    PowerShell: icacls "<the root os.tmpdir() resolves to>" /grant "$env:USERNAME:(OI)(CI)(WO)"',
+    '    cmd:        icacls "<the root os.tmpdir() resolves to>" /grant "%USERNAME%:(OI)(CI)(WO)"',
+    '  `(OI)(CI)` is the whole of the difference: without it the ACE is explicit and reaches nothing that did not',
+    '  already exist. That is why the backend\'s own skill — the right tool for the path the probe names — is the',
+    '  wrong one here: its ACE comes from the three-argument `FileSystemAccessRule(SID, FullControl, Allow)`',
+    '  constructor, which .NET defines with `InheritanceFlags.None`, so the skill aimed at the temp root repairs',
+    '  the temp root itself and leaves the next session\'s directory exactly where it was.',
+    '  Read the result as the experiment it is, and run it unelevated. Under candidate 2 the next private',
+    '  directory provisions and the privilege reading is refuted with it; under candidates 1 and 3 the same',
+    '  sentence returns, and that is a finding about the documented prerequisite rather than a reason to run the',
+    '  grant again. What it is not is a grant aimed at a guess: the parent of the directory the probe just found',
+    '  is the object this failure is about.',
+    '  One boundary — this settles the private capability, which is `os.tmpdir()`\'s. The lock of candidate 1',
+    '  lives under the OTHER root, and that one is settled by the listing rather than by any grant.',
+    '',
+  ]
+}
+
+/**
  * Build the advisory for an ACL grant whose rollback failed with it.
  *
  * The whole difficulty of this family is that the producer's line is an
@@ -2161,6 +2278,7 @@ function aclAggregateAdvisory(failure: AclAggregateFailure, tool?: string, href?
     '     than a second fault — a grant that threw while holding the directory can leave it open, and a plain',
     '     delete of an open directory fails. So a failing removal is not by itself independent evidence.',
     '',
+    ...elevationIsTwoVariables(),
     'TWO TEMP ROOTS, NOT ONE — and this is where a redirect can look like it did nothing. This one call',
     'resolves temp twice, through two different mechanisms that can disagree:',
     '  - `os.tmpdir()` (Node) chooses the private capability directory, named `dsh-XXXXXX`;',
@@ -2176,9 +2294,11 @@ function aclAggregateAdvisory(failure: AclAggregateFailure, tool?: string, href?
     'directory that failed is under the OTHER root — which is why repairing the redirected one changes',
     'nothing.',
     '',
-    "THE REPAIR IS THE BACKEND'S OWN, and it must be aimed at the path this probe names. `sandbox-windows-acl`",
-    'ships and registers a `diagnose-windows-sandbox-acl` skill: it reads the requested path and every',
-    "ancestor, adds the signed-in user's Full-control allow ACE where effective `WRITE_DAC`/`WRITE_OWNER` is",
+    "THE REPAIR IS THE BACKEND'S OWN, and it must be aimed at the path this probe names — with one exception,",
+    'stated after it, for when that path is a per-session directory rather than one that lasts.',
+    '`sandbox-windows-acl` ships and registers a `diagnose-windows-sandbox-acl` skill: it reads the requested',
+    'path and every ancestor, adds the signed-in user\'s Full-control allow ACE where effective',
+    '`WRITE_DAC`/`WRITE_OWNER` is',
     'missing, verifies every change by re-reading it, backs up each changed DACL, preserves denies, owner,',
     'inheritance and the SACL, refuses reparse points, and restores its own attempted changes in reverse order',
     'if a repair fails. It needs ONE unconfined call: a confined child cannot read or write the security',
@@ -2187,6 +2307,7 @@ function aclAggregateAdvisory(failure: AclAggregateFailure, tool?: string, href?
     'symbol does not exist anywhere in the package, so "the README promised a skill" is not a reason to look',
     'for one there.',
     '',
+    ...durableTempRootInstance(),
     'WHAT DOES NOT HELP, and this report is where both were tried:',
     '  takeown /F "<root>" /A',
     '    moves OWNERSHIP to Administrators, and owner-implicit rights are READ_CONTROL and WRITE_DAC only.',
@@ -2212,8 +2333,10 @@ function aclAggregateAdvisory(failure: AclAggregateFailure, tool?: string, href?
     'inner error, so the diagnosis is delivered here instead. This is a stopgap, ' + where + '.',
     'It arrives through the session rather than through a shell, which is the thing this failure has just',
     'taken away — the reason a repair script cannot be the answer at the moment it is needed.',
-    'What it is NOT: this plugin neither edits ACLs nor elevates, and it ships no grant command here, because',
-    'nothing in the line names the directory one would have to be aimed at.',
+    'What it is NOT: this plugin neither edits ACLs nor elevates, and it ships no grant aimed at the FAILED',
+    'directory, because nothing in a line like this names it and a grant aimed at the wrong directory is worse',
+    'than none. The one grant above is aimed at the temp root instead — the parent of the directory the probe',
+    'found, and the only object here that can be named without the withheld line.',
     'Your file read/write tools still work; only sandboxed command execution is blocked.',
   ].join('\n')
 }
