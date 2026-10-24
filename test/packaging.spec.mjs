@@ -44,7 +44,7 @@ const manifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
  * so the list is the contract, not the manifest — every entry above was probed
  * (`npm run test:probe-lines`) for the version that claims it.
  */
-const SUPPORTED_LINES = ['0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-alpha.1', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.7-rc.1', '0.1.7-rc.2']
+const SUPPORTED_LINES = ['0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-alpha.1', '0.1.6-alpha.1', '0.1.7-alpha.1', '0.1.7-rc.1', '0.1.7-rc.2', '0.2.1-alpha.2', '0.2.1-rc.3']
 
 /** Every file under `dir` whose name ends with one of `extensions`. */
 function walk(dir, extensions, found = []) {

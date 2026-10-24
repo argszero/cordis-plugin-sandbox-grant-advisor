@@ -1771,10 +1771,10 @@ than one that stays silent.
 Harness peers — all three carry the **same** range, quoted in full on purpose
 (a partially quoted range admits fewer lines than the published one):
 
-- `@deepseek-ai/dsh-llm@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0` — the only **runtime**
+- `@deepseek-ai/dsh-llm@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0 || >=0.2.1-alpha.2 <0.3.0` — the only **runtime**
   import: `createUserMessage` and `boundContextSummary`.
-- `@deepseek-ai/dsh-agent@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0` and
-  `@deepseek-ai/dsh-tools@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0` — imported for their **types** only (`Agent`,
+- `@deepseek-ai/dsh-agent@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0 || >=0.2.1-alpha.2 <0.3.0` and
+  `@deepseek-ai/dsh-tools@>=0.1.2-rc.1 <0.2.0 || >=0.1.3-alpha.2 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-alpha.1 <0.2.0 || >=0.1.7-alpha.1 <0.2.0 || >=0.2.1-alpha.2 <0.3.0` — imported for their **types** only (`Agent`,
   `ToolExecution`, `PostToolDecision`, …). Nothing is loaded from them at
   runtime, but the shipped `lib/types/index.d.ts` still names them, so a consumer
   on a line outside this range fails to typecheck against this package's own
@@ -1790,6 +1790,14 @@ failing to load. See `src/mode.ts`.
 Probed at the newest build of every line the range admits — `0.1.2-rc.1`,
 `0.1.3-alpha.2`, `0.1.5-rc.3`, `0.1.6-alpha.2`, `0.1.7-rc.2` (the newest build of
 the line the later Windows reports ran on) — with `npm run test:probe-lines`,
+
+`0.27.1` appends one more segment, `>=0.2.1-alpha.2 <0.3.0`, and its boundary
+`0.2.1-alpha.2` passes the same probe before release; the identical tree also
+passes with every harness peer at `0.2.1-rc.3`, the line the packaged desktop
+ships today. The `0.2.0` line is deliberately **not** admitted: no build of this
+plugin has been probed on it, and the packaging test that forbids a range from
+admitting the next minor line is what keeps an unprobed line from being claimed
+by accident.
 which derives those builds from this range, installs each one from the registry
 into a scratch tree and runs the suite against it. `0.1.7-rc.1`, the build the
 third report ran, is admitted by the same `||` segment and was probed while it was
