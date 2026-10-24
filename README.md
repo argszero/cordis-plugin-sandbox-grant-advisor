@@ -1571,8 +1571,25 @@ covering this family is posted there.
 ## Install
 
 ```sh
-npm install @argszero/cordis-plugin-sandbox-grant-advisor
+dsh plugin --profile <name> add github:argszero/cordis-plugin-sandbox-grant-advisor
 ```
+
+**The registry copy is `0.27.0`, and `dsh` 0.2.1-rc.3 refuses it before anything
+loads**: every harness peer there ends at `<0.2.0`, and the install gate reads
+those ranges rather than the code, so it reports *"Plugin
+@argszero/cordis-plugin-sandbox-grant-advisor@0.27.0 is incompatible with dsh
+0.2.1-rc.3"* and installs nothing (measured 2026-10-24 and again 2026-10-25).
+The git spec above is `0.27.1`, which admits the `0.2.1` line. `npm install` on
+its own also never attaches the plugin to a profile — `dsh plugin add` is what
+writes the row that makes it load.
+
+A `github:` install builds the package in `prepare`, and pnpm blocks that build
+until the exact key it prints is allowed: the first run stops with
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. Paste the printed key under
+`allowBuilds` in the profile's `pnpm-workspace.yaml` and re-run — that second run
+is the install. (Before this, the package declared no `prepare` at all while
+`lib/` sits in `.gitignore`, so a git install produced a `main` that did not
+exist.)
 
 Mount it by adding the patch to your profile, or apply the shipped
 `cordis.patch.yml`:

@@ -66,6 +66,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "pretest": "tsc",
     "test": "node --test \"test/*.spec.mjs\"",
     "test:probe-lines": "node scripts/probe-lines.mjs",
